@@ -79,7 +79,7 @@ void DeallocateCurrent()
     SetTLSValue(currentTLS, NULL);
 }
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
+extern "C" BOOL WINAPI DllMainGLESv2(HINSTANCE, DWORD reason, LPVOID)
 {
     switch (reason)
     {
