@@ -126,7 +126,7 @@ bool TerminateProcess()
 
 }  // namespace egl
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
+extern "C" BOOL WINAPI DllMainGLESv2(HINSTANCE, DWORD reason, LPVOID)
 {
     switch (reason)
     {
