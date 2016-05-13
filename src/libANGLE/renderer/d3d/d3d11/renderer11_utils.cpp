@@ -1734,6 +1734,8 @@ void SetPositionLayerTexCoord3DVertex(PositionLayerTexCoord3DVertex* vertex, flo
 
 HRESULT SetDebugName(ID3D11DeviceChild *resource, const char *name)
 {
+    return S_OK;
+/*
 #if defined(_DEBUG)
     UINT existingDataSize = 0;
     resource->GetPrivateData(WKPDID_D3DDebugObjectName, &existingDataSize, nullptr);
@@ -1768,6 +1770,7 @@ HRESULT SetDebugName(ID3D11DeviceChild *resource, const char *name)
 #else
     return S_OK;
 #endif
+*/
 }
 
 LazyInputLayout::LazyInputLayout(const D3D11_INPUT_ELEMENT_DESC *inputDesc,
