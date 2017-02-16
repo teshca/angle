@@ -17,6 +17,7 @@
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/gl/BufferGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
+#include "libANGLE/renderer/gl/renderergl_utils.h"
 #include "libANGLE/renderer/gl/StateManagerGL.h"
 
 using namespace gl;
@@ -96,6 +97,20 @@ gl::Error VertexArrayGL::syncDrawElementsState(const gl::AttributesMask &activeA
                          primitiveRestartEnabled, outIndices);
 }
 
+gl::Error VertexArrayGL::syncElementArrayState() const
+{
+    gl::Buffer *elementArrayBuffer = mData.getElementArrayBuffer().get();
+    ASSERT(elementArrayBuffer);
+    if (elementArrayBuffer != mAppliedElementArrayBuffer.get())
+    {
+        const BufferGL *bufferGL = GetImplAs<BufferGL>(elementArrayBuffer);
+        mStateManager->bindBuffer(GL_ELEMENT_ARRAY_BUFFER, bufferGL->getBufferID());
+        mAppliedElementArrayBuffer.set(elementArrayBuffer);
+    }
+
+    return gl::NoError();
+}
+
 gl::Error VertexArrayGL::syncDrawState(const gl::AttributesMask &activeAttributesMask,
                                        GLint first,
                                        GLsizei count,
@@ -140,13 +155,13 @@ gl::Error VertexArrayGL::syncDrawState(const gl::AttributesMask &activeAttribute
     return Error(GL_NO_ERROR);
 }
 
-Error VertexArrayGL::syncIndexData(GLsizei count,
-                                   GLenum type,
-                                   const GLvoid *indices,
-                                   bool primitiveRestartEnabled,
-                                   bool attributesNeedStreaming,
-                                   IndexRange *outIndexRange,
-                                   const GLvoid **outIndices) const
+gl::Error VertexArrayGL::syncIndexData(GLsizei count,
+                                       GLenum type,
+                                       const GLvoid *indices,
+                                       bool primitiveRestartEnabled,
+                                       bool attributesNeedStreaming,
+                                       IndexRange *outIndexRange,
+                                       const GLvoid **outIndices) const
 {
     ASSERT(outIndices);
 
@@ -288,7 +303,8 @@ gl::Error VertexArrayGL::streamAttributes(const gl::AttributesMask &activeAttrib
     size_t unmapRetryAttempts = 5;
     while (unmapResult != GL_TRUE && --unmapRetryAttempts > 0)
     {
-        uint8_t *bufferPointer = reinterpret_cast<uint8_t*>(mFunctions->mapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+        uint8_t *bufferPointer = MapBufferRangeWithFallback(mFunctions, GL_ARRAY_BUFFER, 0,
+                                                            requiredBufferSize, GL_MAP_WRITE_BIT);
         size_t curBufferOffset = bufferEmptySpace;
 
         const auto &attribs = mData.getVertexAttributes();

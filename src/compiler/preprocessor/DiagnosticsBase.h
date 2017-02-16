@@ -44,9 +44,11 @@ class Diagnostics
         PP_MACRO_PREDEFINED_REDEFINED,
         PP_MACRO_PREDEFINED_UNDEFINED,
         PP_MACRO_UNTERMINATED_INVOCATION,
+        PP_MACRO_UNDEFINED_WHILE_INVOKED,
         PP_MACRO_TOO_FEW_ARGS,
         PP_MACRO_TOO_MANY_ARGS,
         PP_MACRO_DUPLICATE_PARAMETER_NAMES,
+        PP_MACRO_INVOCATION_CHAIN_TOO_DEEP,
         PP_CONDITIONAL_ENDIF_WITHOUT_IF,
         PP_CONDITIONAL_ELSE_WITHOUT_IF,
         PP_CONDITIONAL_ELSE_AFTER_ELSE,
@@ -65,6 +67,7 @@ class Diagnostics
         PP_INVALID_FILE_NUMBER,
         PP_INVALID_LINE_DIRECTIVE,
         PP_NON_PP_TOKEN_BEFORE_EXTENSION_ESSL3,
+        PP_UNDEFINED_SHIFT,
         PP_ERROR_END,
 
         PP_WARNING_BEGIN,
@@ -83,9 +86,7 @@ class Diagnostics
     Severity severity(ID id);
     std::string message(ID id);
 
-    virtual void print(ID id,
-                       const SourceLocation &loc,
-                       const std::string &text) = 0;
+    virtual void print(ID id, const SourceLocation &loc, const std::string &text) = 0;
 };
 
 }  // namespace pp

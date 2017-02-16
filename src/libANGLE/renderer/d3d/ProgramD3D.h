@@ -97,13 +97,10 @@ struct D3DVarying final
     unsigned int outputSlot;
 };
 
-class ProgramD3DMetadata : angle::NonCopyable
+class ProgramD3DMetadata final : angle::NonCopyable
 {
   public:
-    ProgramD3DMetadata(int rendererMajorShaderModel,
-                       const std::string &shaderModelSuffix,
-                       bool usesInstancedPointSpriteEmulation,
-                       bool usesViewScale,
+    ProgramD3DMetadata(RendererD3D *renderer,
                        const ShaderD3D *vertexShader,
                        const ShaderD3D *fragmentShader);
 
@@ -121,6 +118,9 @@ class ProgramD3DMetadata : angle::NonCopyable
     bool usesMultipleFragmentOuts() const;
     GLint getMajorShaderVersion() const;
     const ShaderD3D *getFragmentShader() const;
+
+    // Applies the metadata structure to the varying packing.
+    void updatePackingBuiltins(ShaderType shaderType, VaryingPacking *packing);
 
   private:
     const int mRendererMajorShaderModel;
@@ -151,7 +151,9 @@ class ProgramD3D : public ProgramImpl
     bool usesGeometryShader(GLenum drawMode) const;
     bool usesInstancedPointSpriteEmulation() const;
 
-    LinkResult load(gl::InfoLog &infoLog, gl::BinaryInputStream *stream) override;
+    LinkResult load(const ContextImpl *contextImpl,
+                    gl::InfoLog &infoLog,
+                    gl::BinaryInputStream *stream) override;
     gl::Error save(gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
 
@@ -174,6 +176,10 @@ class ProgramD3D : public ProgramImpl
     bool getUniformBlockSize(const std::string &blockName, size_t *sizeOut) const override;
     bool getUniformBlockMemberInfo(const std::string &memberUniformName,
                                    sh::BlockMemberInfo *memberInfoOut) const override;
+    void setPathFragmentInputGen(const std::string &inputName,
+                                 GLenum genMode,
+                                 GLint components,
+                                 const GLfloat *coeffs) override;
 
     void initializeUniformStorage();
     gl::Error applyUniforms(GLenum drawMode);
@@ -247,6 +253,12 @@ class ProgramD3D : public ProgramImpl
     bool isSamplerMappingDirty() { return mDirtySamplerMapping; }
 
   private:
+    // These forward-declared tasks are used for multi-thread shader compiles.
+    class GetExecutableTask;
+    class GetVertexExecutableTask;
+    class GetPixelExecutableTask;
+    class GetGeometryExecutableTask;
+
     class VertexExecutable
     {
       public:

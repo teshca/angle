@@ -14,20 +14,19 @@
 #include "libANGLE/Constants.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/Shader.h"
-#include "libANGLE/renderer/Renderer.h"
 
 #include <map>
 
+namespace sh
+{
+struct BlockMemberInfo;
+}
+
 namespace rx
 {
+using LinkResult = gl::ErrorOrResult<bool>;
 
-struct LinkResult
-{
-    LinkResult(bool linkSuccess, const gl::Error &error) : linkSuccess(linkSuccess), error(error) {}
-
-    bool linkSuccess;
-    gl::Error error;
-};
+class ContextImpl;
 
 class ProgramImpl : angle::NonCopyable
 {
@@ -35,7 +34,9 @@ class ProgramImpl : angle::NonCopyable
     ProgramImpl(const gl::ProgramState &state) : mState(state) {}
     virtual ~ProgramImpl() {}
 
-    virtual LinkResult load(gl::InfoLog &infoLog, gl::BinaryInputStream *stream) = 0;
+    virtual LinkResult load(const ContextImpl *contextImpl,
+                            gl::InfoLog &infoLog,
+                            gl::BinaryInputStream *stream)  = 0;
     virtual gl::Error save(gl::BinaryOutputStream *stream) = 0;
     virtual void setBinaryRetrievableHint(bool retrievable) = 0;
 
@@ -75,6 +76,12 @@ class ProgramImpl : angle::NonCopyable
     // Returns false for inactive members.
     virtual bool getUniformBlockMemberInfo(const std::string &memberUniformName,
                                            sh::BlockMemberInfo *memberInfoOut) const = 0;
+    // CHROMIUM_path_rendering
+    // Set parameters to control fragment shader input variable interpolation
+    virtual void setPathFragmentInputGen(const std::string &inputName,
+                                         GLenum genMode,
+                                         GLint components,
+                                         const GLfloat *coeffs) = 0;
 
   protected:
     const gl::ProgramState &mState;

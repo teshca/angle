@@ -22,6 +22,7 @@
 #include "libANGLE/validationES.h"
 #include "libANGLE/validationES3.h"
 #include "libANGLE/queryconversions.h"
+#include "libANGLE/queryutils.h"
 
 #include "common/debug.h"
 
@@ -227,7 +228,7 @@ GLboolean GL_APIENTRY IsQuery(GLuint id)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_FALSE;
@@ -309,12 +310,7 @@ void GL_APIENTRY GetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params)
             return;
         }
 
-        Error error = context->getQueryObjectuiv(id, pname, params);
-        if (error.isError())
-        {
-            context->handleError(error);
-            return;
-        }
+        context->getQueryObjectuiv(id, pname, params);
     }
 }
 
@@ -380,7 +376,7 @@ void GL_APIENTRY UniformMatrix2x3fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix2x3fv(location, count, transpose, value);
     }
 }
@@ -398,7 +394,7 @@ void GL_APIENTRY UniformMatrix3x2fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix3x2fv(location, count, transpose, value);
     }
 }
@@ -416,7 +412,7 @@ void GL_APIENTRY UniformMatrix2x4fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix2x4fv(location, count, transpose, value);
     }
 }
@@ -434,7 +430,7 @@ void GL_APIENTRY UniformMatrix4x2fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix4x2fv(location, count, transpose, value);
     }
 }
@@ -452,7 +448,7 @@ void GL_APIENTRY UniformMatrix3x4fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix3x4fv(location, count, transpose, value);
     }
 }
@@ -470,7 +466,7 @@ void GL_APIENTRY UniformMatrix4x3fv(GLint location, GLsizei count, GLboolean tra
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniformMatrix4x3fv(location, count, transpose, value);
     }
 }
@@ -504,7 +500,7 @@ void GL_APIENTRY RenderbufferStorageMultisample(GLenum target, GLsizei samples, 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -515,7 +511,7 @@ void GL_APIENTRY RenderbufferStorageMultisample(GLenum target, GLsizei samples, 
             return;
         }
 
-        Renderbuffer *renderbuffer = context->getState().getCurrentRenderbuffer();
+        Renderbuffer *renderbuffer = context->getGLState().getCurrentRenderbuffer();
         renderbuffer->setStorageMultisample(samples, internalformat, width, height);
     }
 }
@@ -657,7 +653,7 @@ GLboolean GL_APIENTRY IsVertexArray(GLuint array)
     return GL_FALSE;
 }
 
-void GL_APIENTRY GetIntegeri_v(GLenum target, GLuint index, GLint* data)
+void GL_APIENTRY GetIntegeri_v(GLenum target, GLuint index, GLint *data)
 {
     EVENT("(GLenum target = 0x%X, GLuint index = %u, GLint* data = 0x%0.8p)",
           target, index, data);
@@ -665,76 +661,11 @@ void GL_APIENTRY GetIntegeri_v(GLenum target, GLuint index, GLint* data)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() && !ValidateGetIntegeri_v(context, target, index, data))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
-
-        const Caps &caps = context->getCaps();
-        switch (target)
-        {
-          case GL_TRANSFORM_FEEDBACK_BUFFER_START:
-          case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
-          case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
-            if (index >= caps.maxTransformFeedbackSeparateAttributes)
-            {
-                context->handleError(Error(GL_INVALID_VALUE));
-                return;
-            }
-            break;
-
-          case GL_UNIFORM_BUFFER_START:
-          case GL_UNIFORM_BUFFER_SIZE:
-          case GL_UNIFORM_BUFFER_BINDING:
-            if (index >= caps.maxCombinedUniformBlocks)
-            {
-                context->handleError(Error(GL_INVALID_VALUE));
-                return;
-            }
-            break;
-
-          default:
-              context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        if (!(context->getIndexedIntegerv(target, index, data)))
-        {
-            GLenum nativeType;
-            unsigned int numParams = 0;
-            if (!context->getIndexedQueryParameterInfo(target, &nativeType, &numParams))
-            {
-                context->handleError(Error(GL_INVALID_ENUM));
-                return;
-            }
-
-            if (numParams == 0)
-            {
-                return; // it is known that pname is valid, but there are no parameters to return
-            }
-
-            if (nativeType == GL_INT_64_ANGLEX)
-            {
-                GLint64 minIntValue = static_cast<GLint64>(std::numeric_limits<int>::min());
-                GLint64 maxIntValue = static_cast<GLint64>(std::numeric_limits<int>::max());
-                GLint64 *int64Params = new GLint64[numParams];
-
-                context->getIndexedInteger64v(target, index, int64Params);
-
-                for (unsigned int i = 0; i < numParams; ++i)
-                {
-                    GLint64 clampedValue = std::max(std::min(int64Params[i], maxIntValue), minIntValue);
-                    data[i] = static_cast<GLint>(clampedValue);
-                }
-
-                delete [] int64Params;
-            }
-            else
-            {
-                UNREACHABLE();
-            }
-        }
+        context->getIntegeri_v(target, index, data);
     }
 }
 
@@ -761,13 +692,13 @@ void GL_APIENTRY EndTransformFeedback(void)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        TransformFeedback *transformFeedback = context->getState().getCurrentTransformFeedback();
+        TransformFeedback *transformFeedback = context->getGLState().getCurrentTransformFeedback();
         ASSERT(transformFeedback != NULL);
 
         if (!transformFeedback->isActive())
@@ -788,7 +719,7 @@ void GL_APIENTRY BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLi
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -824,6 +755,13 @@ void GL_APIENTRY BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLi
             return;
         }
 
+        if (!context->getGLState().isBindGeneratesResourceEnabled() &&
+            !context->isBufferGenerated(buffer))
+        {
+            context->handleError(Error(GL_INVALID_OPERATION, "Buffer was not generated"));
+            return;
+        }
+
         switch (target)
         {
           case GL_TRANSFORM_FEEDBACK_BUFFER:
@@ -836,7 +774,8 @@ void GL_APIENTRY BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLi
                 }
 
                 // Cannot bind a transform feedback buffer if the current transform feedback is active (3.0.4 pg 91 section 2.15.2)
-                TransformFeedback *curTransformFeedback = context->getState().getCurrentTransformFeedback();
+                TransformFeedback *curTransformFeedback =
+                    context->getGLState().getCurrentTransformFeedback();
                 if (curTransformFeedback && curTransformFeedback->isActive())
                 {
                     context->handleError(Error(GL_INVALID_OPERATION));
@@ -875,7 +814,7 @@ void GL_APIENTRY BindBufferBase(GLenum target, GLuint index, GLuint buffer)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -900,8 +839,35 @@ void GL_APIENTRY BindBufferBase(GLenum target, GLuint index, GLuint buffer)
             }
             break;
 
+          case GL_ATOMIC_COUNTER_BUFFER:
+              if (index >= caps.maxAtomicCounterBufferBindings)
+              {
+                  context->handleError(Error(
+                      GL_INVALID_VALUE,
+                      "Binding index must be less than GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS."));
+                  return;
+              }
+              break;
+
+          case GL_SHADER_STORAGE_BUFFER:
+              if (index >= caps.maxShaderStorageBufferBindings)
+              {
+                  context->handleError(Error(
+                      GL_INVALID_VALUE,
+                      "Binding index must be less than GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS."));
+                  return;
+              }
+              break;
+
           default:
               context->handleError(Error(GL_INVALID_ENUM));
+            return;
+        }
+
+        if (!context->getGLState().isBindGeneratesResourceEnabled() &&
+            !context->isBufferGenerated(buffer))
+        {
+            context->handleError(Error(GL_INVALID_OPERATION, "Buffer was not generated"));
             return;
         }
 
@@ -910,7 +876,8 @@ void GL_APIENTRY BindBufferBase(GLenum target, GLuint index, GLuint buffer)
           case GL_TRANSFORM_FEEDBACK_BUFFER:
             {
                 // Cannot bind a transform feedback buffer if the current transform feedback is active (3.0.4 pg 91 section 2.15.2)
-                TransformFeedback *curTransformFeedback = context->getState().getCurrentTransformFeedback();
+                TransformFeedback *curTransformFeedback =
+                    context->getGLState().getCurrentTransformFeedback();
                 if (curTransformFeedback && curTransformFeedback->isActive())
                 {
                     context->handleError(Error(GL_INVALID_OPERATION));
@@ -926,6 +893,22 @@ void GL_APIENTRY BindBufferBase(GLenum target, GLuint index, GLuint buffer)
             context->bindGenericUniformBuffer(buffer);
             break;
 
+          case GL_ATOMIC_COUNTER_BUFFER:
+              if (buffer != 0)
+              {
+                  // Binding buffers to this binding point is not implemented yet.
+                  UNIMPLEMENTED();
+              }
+              break;
+
+          case GL_SHADER_STORAGE_BUFFER:
+              if (buffer != 0)
+              {
+                  // Binding buffers to this binding point is not implemented yet.
+                  UNIMPLEMENTED();
+              }
+              break;
+
           default:
             UNREACHABLE();
         }
@@ -940,7 +923,7 @@ void GL_APIENTRY TransformFeedbackVaryings(GLuint program, GLsizei count, const 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -988,7 +971,7 @@ void GL_APIENTRY GetTransformFeedbackVarying(GLuint program, GLuint index, GLsiz
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1024,7 +1007,7 @@ void GL_APIENTRY VertexAttribIPointer(GLuint index, GLint size, GLenum type, GLs
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1050,8 +1033,6 @@ void GL_APIENTRY VertexAttribIPointer(GLuint index, GLint size, GLenum type, GLs
           case GL_UNSIGNED_SHORT:
           case GL_INT:
           case GL_UNSIGNED_INT:
-          case GL_INT_2_10_10_10_REV:
-          case GL_UNSIGNED_INT_2_10_10_10_REV:
             break;
 
           default:
@@ -1065,24 +1046,18 @@ void GL_APIENTRY VertexAttribIPointer(GLuint index, GLint size, GLenum type, GLs
             return;
         }
 
-        if ((type == GL_INT_2_10_10_10_REV || type == GL_UNSIGNED_INT_2_10_10_10_REV) && size != 4)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
         // [OpenGL ES 3.0.2] Section 2.8 page 24:
         // An INVALID_OPERATION error is generated when a non-zero vertex array object
         // is bound, zero is bound to the ARRAY_BUFFER buffer object binding point,
         // and the pointer argument is not NULL.
-        if (context->getState().getVertexArray()->id() != 0 && context->getState().getArrayBufferId() == 0 && pointer != NULL)
+        if (context->getGLState().getVertexArray()->id() != 0 &&
+            context->getGLState().getArrayBufferId() == 0 && pointer != NULL)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        context->getState().setVertexAttribState(index, context->getState().getTargetBuffer(GL_ARRAY_BUFFER), size, type, false, true,
-                                                 stride, pointer);
+        context->vertexAttribIPointer(index, size, type, stride, pointer);
     }
 }
 
@@ -1094,36 +1069,17 @@ void GL_APIENTRY GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        if (index >= MAX_VERTEX_ATTRIBS)
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        if (!ValidateGetVertexAttribParameters(context, pname))
+        if (!context->skipValidation() &&
+            !ValidateGetVertexAttribIiv(context, index, pname, params))
         {
             return;
         }
 
-        if (pname == GL_CURRENT_VERTEX_ATTRIB)
-        {
-            const VertexAttribCurrentValueData &currentValueData = context->getState().getVertexAttribCurrentValue(index);
-            for (int i = 0; i < 4; ++i)
-            {
-                params[i] = currentValueData.IntValues[i];
-            }
-        }
-        else
-        {
-            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
-            *params = QuerySingleVertexAttributeParameter<GLint>(attribState, pname);
-        }
+        const VertexAttribCurrentValueData &currentValues =
+            context->getGLState().getVertexAttribCurrentValue(index);
+        const VertexAttribute &attrib =
+            context->getGLState().getVertexArray()->getVertexAttribute(index);
+        QueryVertexAttribIiv(attrib, currentValues, pname, params);
     }
 }
 
@@ -1135,36 +1091,17 @@ void GL_APIENTRY GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        if (index >= MAX_VERTEX_ATTRIBS)
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        if (!ValidateGetVertexAttribParameters(context, pname))
+        if (!context->skipValidation() &&
+            !ValidateGetVertexAttribIuiv(context, index, pname, params))
         {
             return;
         }
 
-        if (pname == GL_CURRENT_VERTEX_ATTRIB)
-        {
-            const VertexAttribCurrentValueData &currentValueData = context->getState().getVertexAttribCurrentValue(index);
-            for (int i = 0; i < 4; ++i)
-            {
-                params[i] = currentValueData.UnsignedIntValues[i];
-            }
-        }
-        else
-        {
-            const VertexAttribute &attribState = context->getState().getVertexArray()->getVertexAttribute(index);
-            *params = QuerySingleVertexAttributeParameter<GLuint>(attribState, pname);
-        }
+        const VertexAttribCurrentValueData &currentValues =
+            context->getGLState().getVertexAttribCurrentValue(index);
+        const VertexAttribute &attrib =
+            context->getGLState().getVertexArray()->getVertexAttribute(index);
+        QueryVertexAttribIuiv(attrib, currentValues, pname, params);
     }
 }
 
@@ -1176,7 +1113,7 @@ void GL_APIENTRY VertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1188,8 +1125,7 @@ void GL_APIENTRY VertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint 
             return;
         }
 
-        GLint vals[4] = { x, y, z, w };
-        context->getState().setVertexAttribi(index, vals);
+        context->vertexAttribI4i(index, x, y, z, w);
     }
 }
 
@@ -1201,7 +1137,7 @@ void GL_APIENTRY VertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GL
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1213,8 +1149,7 @@ void GL_APIENTRY VertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GL
             return;
         }
 
-        GLuint vals[4] = { x, y, z, w };
-        context->getState().setVertexAttribu(index, vals);
+        context->vertexAttribI4ui(index, x, y, z, w);
     }
 }
 
@@ -1225,7 +1160,7 @@ void GL_APIENTRY VertexAttribI4iv(GLuint index, const GLint* v)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1237,7 +1172,7 @@ void GL_APIENTRY VertexAttribI4iv(GLuint index, const GLint* v)
             return;
         }
 
-        context->getState().setVertexAttribi(index, v);
+        context->vertexAttribI4iv(index, v);
     }
 }
 
@@ -1248,7 +1183,7 @@ void GL_APIENTRY VertexAttribI4uiv(GLuint index, const GLuint* v)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1260,7 +1195,7 @@ void GL_APIENTRY VertexAttribI4uiv(GLuint index, const GLuint* v)
             return;
         }
 
-        context->getState().setVertexAttribu(index, v);
+        context->vertexAttribI4uiv(index, v);
     }
 }
 
@@ -1292,7 +1227,7 @@ GLint GL_APIENTRY GetFragDataLocation(GLuint program, const GLchar *name)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return -1;
@@ -1354,7 +1289,7 @@ void GL_APIENTRY Uniform1uiv(GLint location, GLsizei count, const GLuint* value)
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniform1uiv(location, count, value);
     }
 }
@@ -1372,7 +1307,7 @@ void GL_APIENTRY Uniform2uiv(GLint location, GLsizei count, const GLuint* value)
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniform2uiv(location, count, value);
     }
 }
@@ -1390,7 +1325,7 @@ void GL_APIENTRY Uniform3uiv(GLint location, GLsizei count, const GLuint* value)
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniform3uiv(location, count, value);
     }
 }
@@ -1408,7 +1343,7 @@ void GL_APIENTRY Uniform4uiv(GLint location, GLsizei count, const GLuint* value)
             return;
         }
 
-        Program *program = context->getState().getProgram();
+        Program *program = context->getGLState().getProgram();
         program->setUniform4uiv(location, count, value);
     }
 }
@@ -1492,28 +1427,15 @@ const GLubyte *GL_APIENTRY GetStringi(GLenum name, GLuint index)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() && !ValidateGetStringi(context, name, index))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return NULL;
+            return nullptr;
         }
 
-        if (name != GL_EXTENSIONS)
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return NULL;
-        }
-
-        if (index >= context->getExtensionStringCount())
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return NULL;
-        }
-
-        return reinterpret_cast<const GLubyte*>(context->getExtensionString(index).c_str());
+        return context->getStringi(name, index);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 void GL_APIENTRY CopyBufferSubData(GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size)
@@ -1524,58 +1446,14 @@ void GL_APIENTRY CopyBufferSubData(GLenum readTarget, GLenum writeTarget, GLintp
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() &&
+            !ValidateCopyBufferSubData(context, readTarget, writeTarget, readOffset, writeOffset,
+                                       size))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        if (!ValidBufferTarget(context, readTarget) || !ValidBufferTarget(context, writeTarget))
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        Buffer *readBuffer = context->getState().getTargetBuffer(readTarget);
-        Buffer *writeBuffer = context->getState().getTargetBuffer(writeTarget);
-
-        if (!readBuffer || !writeBuffer)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        // Verify that readBuffer and writeBuffer are not currently mapped
-        if (readBuffer->isMapped() || writeBuffer->isMapped())
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        if (readOffset < 0 || writeOffset < 0 || size < 0 ||
-            static_cast<unsigned int>(readOffset + size) > readBuffer->getSize() ||
-            static_cast<unsigned int>(writeOffset + size) > writeBuffer->getSize())
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        if (readBuffer == writeBuffer && std::abs(readOffset - writeOffset) < size)
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        // if size is zero, the copy is a successful no-op
-        if (size > 0)
-        {
-            Error error = writeBuffer->copyBufferSubData(readBuffer, readOffset, writeOffset, size);
-            if (error.isError())
-            {
-                context->handleError(error);
-                return;
-            }
-        }
+        context->copyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
     }
 }
 
@@ -1587,7 +1465,7 @@ void GL_APIENTRY GetUniformIndices(GLuint program, GLsizei uniformCount, const G
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1631,7 +1509,7 @@ void GL_APIENTRY GetActiveUniformsiv(GLuint program, GLsizei uniformCount, const
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1699,7 +1577,7 @@ GLuint GL_APIENTRY GetUniformBlockIndex(GLuint program, const GLchar* uniformBlo
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_INVALID_INDEX;
@@ -1725,43 +1603,14 @@ void GL_APIENTRY GetActiveUniformBlockiv(GLuint program, GLuint uniformBlockInde
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-        Program *programObject = GetValidProgram(context, program);
-
-        if (!programObject)
+        if (!context->skipValidation() &&
+            !ValidateGetActiveUniformBlockiv(context, program, uniformBlockIndex, pname, params))
         {
             return;
         }
 
-        if (uniformBlockIndex >= programObject->getActiveUniformBlockCount())
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        switch (pname)
-        {
-          case GL_UNIFORM_BLOCK_BINDING:
-            *params = static_cast<GLint>(programObject->getUniformBlockBinding(uniformBlockIndex));
-            break;
-
-          case GL_UNIFORM_BLOCK_DATA_SIZE:
-          case GL_UNIFORM_BLOCK_NAME_LENGTH:
-          case GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
-          case GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:
-          case GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:
-          case GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER:
-            programObject->getActiveUniformBlockiv(uniformBlockIndex, pname, params);
-            break;
-
-          default:
-              context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
+        const Program *programObject = context->getProgram(program);
+        QueryActiveUniformBlockiv(programObject, uniformBlockIndex, pname, params);
     }
 }
 
@@ -1773,7 +1622,7 @@ void GL_APIENTRY GetActiveUniformBlockName(GLuint program, GLuint uniformBlockIn
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1804,7 +1653,7 @@ void GL_APIENTRY UniformBlockBinding(GLuint program, GLuint uniformBlockIndex, G
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1842,7 +1691,7 @@ void GL_APIENTRY DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GL
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1870,7 +1719,7 @@ void GL_APIENTRY DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1899,7 +1748,7 @@ GLsync GL_APIENTRY FenceSync_(GLenum condition, GLbitfield flags)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return 0;
@@ -1941,7 +1790,7 @@ GLboolean GL_APIENTRY IsSync(GLsync sync)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_FALSE;
@@ -1960,7 +1809,7 @@ void GL_APIENTRY DeleteSync(GLsync sync)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -1984,7 +1833,7 @@ GLenum GL_APIENTRY ClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeou
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_WAIT_FAILED;
@@ -2026,7 +1875,7 @@ void GL_APIENTRY WaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2068,7 +1917,7 @@ void GL_APIENTRY GetInteger64v(GLenum pname, GLint64* params)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2100,7 +1949,7 @@ void GL_APIENTRY GetSynciv(GLsync sync, GLenum pname, GLsizei bufSize, GLsizei* 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2152,71 +2001,11 @@ void GL_APIENTRY GetInteger64i_v(GLenum target, GLuint index, GLint64* data)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() && !ValidateGetInteger64i_v(context, target, index, data))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
-
-        const Caps &caps = context->getCaps();
-        switch (target)
-        {
-          case GL_TRANSFORM_FEEDBACK_BUFFER_START:
-          case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
-          case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
-            if (index >= caps.maxTransformFeedbackSeparateAttributes)
-            {
-                context->handleError(Error(GL_INVALID_VALUE));
-                return;
-            }
-            break;
-
-          case GL_UNIFORM_BUFFER_START:
-          case GL_UNIFORM_BUFFER_SIZE:
-          case GL_UNIFORM_BUFFER_BINDING:
-            if (index >= caps.maxUniformBufferBindings)
-            {
-                context->handleError(Error(GL_INVALID_VALUE));
-                return;
-            }
-            break;
-
-          default:
-              context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        if (!(context->getIndexedInteger64v(target, index, data)))
-        {
-            GLenum nativeType;
-            unsigned int numParams = 0;
-            if (!context->getIndexedQueryParameterInfo(target, &nativeType, &numParams))
-            {
-                context->handleError(Error(GL_INVALID_ENUM));
-                return;
-            }
-
-            if (numParams == 0)
-                return; // it is known that pname is valid, but there are no parameters to return
-
-            if (nativeType == GL_INT)
-            {
-                GLint *intParams = new GLint[numParams];
-
-                context->getIndexedIntegerv(target, index, intParams);
-
-                for (unsigned int i = 0; i < numParams; ++i)
-                {
-                    data[i] = static_cast<GLint64>(intParams[i]);
-                }
-
-                delete [] intParams;
-            }
-            else
-            {
-                UNREACHABLE();
-            }
-        }
+        context->getInteger64i_v(target, index, data);
     }
 }
 
@@ -2228,55 +2017,14 @@ void GL_APIENTRY GetBufferParameteri64v(GLenum target, GLenum pname, GLint64* pa
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() &&
+            !ValidateGetBufferParameteri64v(context, target, pname, params))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        if (!ValidBufferTarget(context, target))
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        if (!ValidBufferParameter(context, pname))
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        Buffer *buffer = context->getState().getTargetBuffer(target);
-
-        if (!buffer)
-        {
-            // A null buffer means that "0" is bound to the requested buffer target
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        switch (pname)
-        {
-          case GL_BUFFER_USAGE:
-            *params = static_cast<GLint64>(buffer->getUsage());
-            break;
-          case GL_BUFFER_SIZE:
-            *params = buffer->getSize();
-            break;
-          case GL_BUFFER_ACCESS_FLAGS:
-            *params = static_cast<GLint64>(buffer->getAccessFlags());
-            break;
-          case GL_BUFFER_MAPPED:
-            *params = static_cast<GLint64>(buffer->isMapped());
-            break;
-          case GL_BUFFER_MAP_OFFSET:
-            *params = buffer->getMapOffset();
-            break;
-          case GL_BUFFER_MAP_LENGTH:
-            *params = buffer->getMapLength();
-            break;
-          default: UNREACHABLE(); break;
-        }
+        Buffer *buffer = context->getGLState().getTargetBuffer(target);
+        QueryBufferParameteri64v(buffer, pname, params);
     }
 }
 
@@ -2325,7 +2073,7 @@ GLboolean GL_APIENTRY IsSampler(GLuint sampler)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_FALSE;
@@ -2344,7 +2092,7 @@ void GL_APIENTRY BindSampler(GLuint unit, GLuint sampler)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2385,7 +2133,20 @@ void GL_APIENTRY SamplerParameteri(GLuint sampler, GLenum pname, GLint param)
 
 void GL_APIENTRY SamplerParameteriv(GLuint sampler, GLenum pname, const GLint* param)
 {
-    SamplerParameteri(sampler, pname, *param);
+    EVENT("(GLuint sampler = %u, GLenum pname = 0x%X, const GLint* params = 0x%0.8p)", sampler,
+          pname, param);
+
+    Context *context = GetValidGlobalContext();
+    if (context)
+    {
+        if (!context->skipValidation() &&
+            !ValidateSamplerParameteriv(context, sampler, pname, param))
+        {
+            return;
+        }
+
+        context->samplerParameteriv(sampler, pname, param);
+    }
 }
 
 void GL_APIENTRY SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param)
@@ -2407,34 +2168,37 @@ void GL_APIENTRY SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param)
 
 void GL_APIENTRY SamplerParameterfv(GLuint sampler, GLenum pname, const GLfloat* param)
 {
-    SamplerParameterf(sampler, pname, *param);
-}
-
-void GL_APIENTRY GetSamplerParameteriv(GLuint sampler, GLenum pname, GLint* params)
-{
-    EVENT("(GLuint sampler = %u, GLenum pname = 0x%X, GLint* params = 0x%0.8p)", sampler, pname, params);
+    EVENT("(GLuint sampler = %u, GLenum pname = 0x%X, const GLfloat* params = 0x%0.8p)", sampler,
+          pname, param);
 
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        if (!ValidateSamplerObjectParameter(context, pname))
+        if (!context->skipValidation() &&
+            !ValidateSamplerParameterfv(context, sampler, pname, param))
         {
             return;
         }
 
-        if (!context->isSampler(sampler))
+        context->samplerParameterfv(sampler, pname, param);
+    }
+}
+
+void GL_APIENTRY GetSamplerParameteriv(GLuint sampler, GLenum pname, GLint *params)
+{
+    EVENT("(GLuint sampler = %u, GLenum pname = 0x%X, GLint* params = 0x%0.8p)", sampler, pname,
+          params);
+
+    Context *context = GetValidGlobalContext();
+    if (context)
+    {
+        if (!context->skipValidation() &&
+            !ValidateGetSamplerParameteriv(context, sampler, pname, params))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        *params = context->getSamplerParameteri(sampler, pname);
+        context->getSamplerParameteriv(sampler, pname, params);
     }
 }
 
@@ -2445,24 +2209,13 @@ void GL_APIENTRY GetSamplerParameterfv(GLuint sampler, GLenum pname, GLfloat* pa
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        if (!ValidateSamplerObjectParameter(context, pname))
+        if (!context->skipValidation() &&
+            !ValidateGetSamplerParameterfv(context, sampler, pname, params))
         {
             return;
         }
 
-        if (!context->isSampler(sampler))
-        {
-            context->handleError(Error(GL_INVALID_OPERATION));
-            return;
-        }
-
-        *params = context->getSamplerParameterf(sampler, pname);
+        context->getSamplerParameterfv(sampler, pname, params);
     }
 }
 
@@ -2473,7 +2226,7 @@ void GL_APIENTRY VertexAttribDivisor(GLuint index, GLuint divisor)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2496,7 +2249,7 @@ void GL_APIENTRY BindTransformFeedback(GLenum target, GLuint id)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2507,7 +2260,8 @@ void GL_APIENTRY BindTransformFeedback(GLenum target, GLuint id)
           case GL_TRANSFORM_FEEDBACK:
             {
                 // Cannot bind a transform feedback object if the current one is started and not paused (3.0.2 pg 85 section 2.14.1)
-                TransformFeedback *curTransformFeedback = context->getState().getCurrentTransformFeedback();
+                TransformFeedback *curTransformFeedback =
+                    context->getGLState().getCurrentTransformFeedback();
                 if (curTransformFeedback && curTransformFeedback->isActive() && !curTransformFeedback->isPaused())
                 {
                     context->handleError(Error(GL_INVALID_OPERATION));
@@ -2579,7 +2333,7 @@ GLboolean GL_APIENTRY IsTransformFeedback(GLuint id)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return GL_FALSE;
@@ -2606,13 +2360,13 @@ void GL_APIENTRY PauseTransformFeedback(void)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        TransformFeedback *transformFeedback = context->getState().getCurrentTransformFeedback();
+        TransformFeedback *transformFeedback = context->getGLState().getCurrentTransformFeedback();
         ASSERT(transformFeedback != NULL);
 
         // Current transform feedback must be active and not paused in order to pause (3.0.2 pg 86)
@@ -2633,13 +2387,13 @@ void GL_APIENTRY ResumeTransformFeedback(void)
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
-        TransformFeedback *transformFeedback = context->getState().getCurrentTransformFeedback();
+        TransformFeedback *transformFeedback = context->getGLState().getCurrentTransformFeedback();
         ASSERT(transformFeedback != NULL);
 
         // Current transform feedback must be active and paused in order to resume (3.0.2 pg 86)
@@ -2669,7 +2423,7 @@ void GL_APIENTRY GetProgramBinary(GLuint program, GLsizei bufSize, GLsizei* leng
         Program *programObject = context->getProgram(program);
         ASSERT(programObject != nullptr);
 
-        Error error = programObject->saveBinary(binaryFormat, binary, bufSize, length);
+        Error error = programObject->saveBinary(context, binaryFormat, binary, bufSize, length);
         if (error.isError())
         {
             context->handleError(error);
@@ -2694,7 +2448,7 @@ void GL_APIENTRY ProgramBinary(GLuint program, GLenum binaryFormat, const GLvoid
         Program *programObject = context->getProgram(program);
         ASSERT(programObject != nullptr);
 
-        Error error = programObject->loadBinary(binaryFormat, binary, length);
+        Error error = programObject->loadBinary(context, binaryFormat, binary, length);
         if (error.isError())
         {
             context->handleError(error);
@@ -2766,7 +2520,7 @@ void GL_APIENTRY TexStorage2D(GLenum target, GLsizei levels, GLenum internalform
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2798,7 +2552,7 @@ void GL_APIENTRY TexStorage3D(GLenum target, GLsizei levels, GLenum internalform
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (context->getClientMajorVersion() < 3)
         {
             context->handleError(Error(GL_INVALID_OPERATION));
             return;
@@ -2830,55 +2584,14 @@ void GL_APIENTRY GetInternalformativ(GLenum target, GLenum internalformat, GLenu
     Context *context = GetValidGlobalContext();
     if (context)
     {
-        if (context->getClientVersion() < 3)
+        if (!context->skipValidation() &&
+            !ValidateGetInternalFormativ(context, target, internalformat, pname, bufSize, params))
         {
-            context->handleError(Error(GL_INVALID_OPERATION));
             return;
         }
 
         const TextureCaps &formatCaps = context->getTextureCaps().get(internalformat);
-        if (!formatCaps.renderable)
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        if (target != GL_RENDERBUFFER)
-        {
-            context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
-
-        if (bufSize < 0)
-        {
-            context->handleError(Error(GL_INVALID_VALUE));
-            return;
-        }
-
-        switch (pname)
-        {
-          case GL_NUM_SAMPLE_COUNTS:
-            if (bufSize != 0)
-            {
-                *params = static_cast<GLint>(formatCaps.sampleCounts.size());
-            }
-            break;
-
-          case GL_SAMPLES:
-            {
-                size_t returnCount = std::min<size_t>(bufSize, formatCaps.sampleCounts.size());
-                auto sampleReverseIt = formatCaps.sampleCounts.rbegin();
-                for (size_t sampleIndex = 0; sampleIndex < returnCount; ++sampleIndex)
-                {
-                    params[sampleIndex] = *sampleReverseIt++;;
-                }
-            }
-            break;
-
-          default:
-              context->handleError(Error(GL_INVALID_ENUM));
-            return;
-        }
+        QueryInternalFormativ(formatCaps, pname, bufSize, params);
     }
 }
 

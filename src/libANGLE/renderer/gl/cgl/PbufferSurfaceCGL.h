@@ -22,7 +22,8 @@ struct WorkaroundsGL;
 class PbufferSurfaceCGL : public SurfaceGL
 {
   public:
-    PbufferSurfaceCGL(RendererGL *renderer,
+    PbufferSurfaceCGL(const egl::SurfaceState &state,
+                      RendererGL *renderer,
                       EGLint width,
                       EGLint height,
                       const FunctionsGL *functions);
@@ -52,7 +53,7 @@ class PbufferSurfaceCGL : public SurfaceGL
 
     const FunctionsGL *mFunctions;
     StateManagerGL *mStateManager;
-    const WorkaroundsGL &mWorkarounds;
+    RendererGL *mRenderer;
 
     GLuint mFramebuffer;
     GLuint mColorRenderbuffer;

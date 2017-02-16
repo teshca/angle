@@ -26,7 +26,7 @@ GLsizei TypeStride(GLenum attribType)
         case GL_FLOAT:
             return 4;
         default:
-            UNREACHABLE();
+            EXPECT_TRUE(false);
             return 0;
     }
 }
@@ -102,7 +102,7 @@ class VertexAttributeTest : public ANGLETest
 
         if (test.source == Source::BUFFER)
         {
-            GLsizei dataSize = mVertexCount * TypeStride(test.type) * typeSize;
+            GLsizei dataSize = mVertexCount * TypeStride(test.type);
             glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
             glBufferData(GL_ARRAY_BUFFER, dataSize, test.inputData, GL_STATIC_DRAW);
             glVertexAttribPointer(mTestAttrib, typeSize, test.type, test.normalized, 0,
@@ -739,7 +739,7 @@ void VertexAttributeCachingTest::SetUp()
     attribTypes.push_back(GL_SHORT);
     attribTypes.push_back(GL_UNSIGNED_SHORT);
 
-    if (getClientVersion() >= 3)
+    if (getClientMajorVersion() >= 3)
     {
         attribTypes.push_back(GL_INT);
         attribTypes.push_back(GL_UNSIGNED_INT);
@@ -787,7 +787,7 @@ void VertexAttributeCachingTest::SetUp()
 // to stress-test the caching code.
 TEST_P(VertexAttributeCachingTest, BufferMulticaching)
 {
-    if (IsAMD() && isOpenGL())
+    if (IsAMD() && IsDesktopOpenGL())
     {
         std::cout << "Test skipped on AMD OpenGL." << std::endl;
         return;
@@ -825,7 +825,7 @@ TEST_P(VertexAttributeCachingTest, BufferMulticaching)
 // after enough iterations. It validates the unchanged attributes don't get deleted incidentally.
 TEST_P(VertexAttributeCachingTest, BufferMulticachingWithOneUnchangedAttrib)
 {
-    if (IsAMD() && isOpenGL())
+    if (IsAMD() && IsDesktopOpenGL())
     {
         std::cout << "Test skipped on AMD OpenGL." << std::endl;
         return;

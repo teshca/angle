@@ -45,10 +45,11 @@ bool NeedsOffscreenTexture(Renderer11 *renderer, NativeWindow11 *nativeWindow, E
 SwapChain11::SwapChain11(Renderer11 *renderer,
                          NativeWindow11 *nativeWindow,
                          HANDLE shareHandle,
+                         IUnknown *d3dTexture,
                          GLenum backBufferFormat,
                          GLenum depthBufferFormat,
                          EGLint orientation)
-    : SwapChainD3D(shareHandle, backBufferFormat, depthBufferFormat),
+    : SwapChainD3D(shareHandle, d3dTexture, backBufferFormat, depthBufferFormat),
       mRenderer(renderer),
       mWidth(-1),
       mHeight(-1),
@@ -60,6 +61,7 @@ SwapChain11::SwapChain11(Renderer11 *renderer,
       mFirstSwap(true),
       mSwapChain(nullptr),
       mSwapChain1(nullptr),
+      mFrameLatencyWaitableObject(nullptr),
       mKeyedMutex(nullptr),
       mBackBufferTexture(nullptr),
       mBackBufferRTView(nullptr),
@@ -91,6 +93,12 @@ SwapChain11::~SwapChain11()
 
 void SwapChain11::release()
 {
+    if (mFrameLatencyWaitableObject != nullptr)
+    {
+        CloseHandle(mFrameLatencyWaitableObject);
+        mFrameLatencyWaitableObject = nullptr;
+    }
+
     SafeRelease(mSwapChain1);
     SafeRelease(mSwapChain);
     SafeRelease(mKeyedMutex);
@@ -177,45 +185,32 @@ EGLint SwapChain11::resetOffscreenColorBuffer(int backbufferWidth, int backbuffe
 
     releaseOffscreenColorBuffer();
 
-    const d3d11::TextureFormat &backbufferFormatInfo = d3d11::GetTextureFormatInfo(mOffscreenRenderTargetFormat, mRenderer->getRenderer11DeviceCaps());
+    const d3d11::Format &backbufferFormatInfo =
+        d3d11::Format::Get(mOffscreenRenderTargetFormat, mRenderer->getRenderer11DeviceCaps());
 
-    // If the app passed in a share handle, open the resource
-    // See EGL_ANGLE_d3d_share_handle_client_buffer
-    if (mAppCreatedShareHandle)
+    // If the app passed in a share handle or D3D texture, open the resource
+    // See EGL_ANGLE_d3d_share_handle_client_buffer and EGL_ANGLE_d3d_texture_client_buffer
+    if (mAppCreatedShareHandle || mD3DTexture != nullptr)
     {
-        ID3D11Resource *tempResource11;
-        HRESULT result = device->OpenSharedResource(mShareHandle, __uuidof(ID3D11Resource), (void**)&tempResource11);
-
-        if (FAILED(result))
+        if (mAppCreatedShareHandle)
         {
-            ERR("Failed to open the swap chain pbuffer share handle: %08lX", result);
-            release();
-            return EGL_BAD_PARAMETER;
+            ID3D11Resource *tempResource11;
+            HRESULT result = device->OpenSharedResource(mShareHandle, __uuidof(ID3D11Resource),
+                                                        (void **)&tempResource11);
+            ASSERT(SUCCEEDED(result));
+
+            mOffscreenTexture = d3d11::DynamicCastComObject<ID3D11Texture2D>(tempResource11);
+            SafeRelease(tempResource11);
         }
-
-        result = tempResource11->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&mOffscreenTexture);
-        SafeRelease(tempResource11);
-
-        if (FAILED(result))
+        else if (mD3DTexture != nullptr)
         {
-            ERR("Failed to query texture2d interface in pbuffer share handle: %08lX", result);
-            release();
-            return EGL_BAD_PARAMETER;
+            mOffscreenTexture = d3d11::DynamicCastComObject<ID3D11Texture2D>(mD3DTexture);
         }
-
-        // Validate offscreen texture parameters
-        D3D11_TEXTURE2D_DESC offscreenTextureDesc = {0};
-        mOffscreenTexture->GetDesc(&offscreenTextureDesc);
-
-        if (offscreenTextureDesc.Width != (UINT)backbufferWidth ||
-            offscreenTextureDesc.Height != (UINT)backbufferHeight ||
-            offscreenTextureDesc.Format != backbufferFormatInfo.formatSet->texFormat ||
-            offscreenTextureDesc.MipLevels != 1 || offscreenTextureDesc.ArraySize != 1)
+        else
         {
-            ERR("Invalid texture parameters in the shared offscreen texture pbuffer");
-            release();
-            return EGL_BAD_PARAMETER;
+            UNREACHABLE();
         }
+        ASSERT(mOffscreenTexture != nullptr);
     }
     else
     {
@@ -225,7 +220,7 @@ EGLint SwapChain11::resetOffscreenColorBuffer(int backbufferWidth, int backbuffe
         D3D11_TEXTURE2D_DESC offscreenTextureDesc = {0};
         offscreenTextureDesc.Width = backbufferWidth;
         offscreenTextureDesc.Height = backbufferHeight;
-        offscreenTextureDesc.Format               = backbufferFormatInfo.formatSet->texFormat;
+        offscreenTextureDesc.Format               = backbufferFormatInfo.texFormat;
         offscreenTextureDesc.MipLevels = 1;
         offscreenTextureDesc.ArraySize = 1;
         offscreenTextureDesc.SampleDesc.Count = 1;
@@ -283,7 +278,7 @@ EGLint SwapChain11::resetOffscreenColorBuffer(int backbufferWidth, int backbuffe
     mKeyedMutex = d3d11::DynamicCastComObject<IDXGIKeyedMutex>(mOffscreenTexture);
 
     D3D11_RENDER_TARGET_VIEW_DESC offscreenRTVDesc;
-    offscreenRTVDesc.Format             = backbufferFormatInfo.formatSet->rtvFormat;
+    offscreenRTVDesc.Format             = backbufferFormatInfo.rtvFormat;
     offscreenRTVDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
     offscreenRTVDesc.Texture2D.MipSlice = 0;
 
@@ -292,7 +287,7 @@ EGLint SwapChain11::resetOffscreenColorBuffer(int backbufferWidth, int backbuffe
     d3d11::SetDebugName(mOffscreenRTView, "Offscreen back buffer render target");
 
     D3D11_SHADER_RESOURCE_VIEW_DESC offscreenSRVDesc;
-    offscreenSRVDesc.Format                    = backbufferFormatInfo.formatSet->srvFormat;
+    offscreenSRVDesc.Format                    = backbufferFormatInfo.srvFormat;
     offscreenSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     offscreenSRVDesc.Texture2D.MostDetailedMip = 0;
     offscreenSRVDesc.Texture2D.MipLevels = static_cast<UINT>(-1);
@@ -333,13 +328,13 @@ EGLint SwapChain11::resetOffscreenDepthBuffer(int backbufferWidth, int backbuffe
 
     if (mDepthBufferFormat != GL_NONE)
     {
-        const d3d11::TextureFormat &depthBufferFormatInfo =
-            d3d11::GetTextureFormatInfo(mDepthBufferFormat, mRenderer->getRenderer11DeviceCaps());
+        const d3d11::Format &depthBufferFormatInfo =
+            d3d11::Format::Get(mDepthBufferFormat, mRenderer->getRenderer11DeviceCaps());
 
         D3D11_TEXTURE2D_DESC depthStencilTextureDesc;
         depthStencilTextureDesc.Width = backbufferWidth;
         depthStencilTextureDesc.Height = backbufferHeight;
-        depthStencilTextureDesc.Format             = depthBufferFormatInfo.formatSet->texFormat;
+        depthStencilTextureDesc.Format             = depthBufferFormatInfo.texFormat;
         depthStencilTextureDesc.MipLevels = 1;
         depthStencilTextureDesc.ArraySize = 1;
         depthStencilTextureDesc.SampleDesc.Count = 1;
@@ -347,7 +342,7 @@ EGLint SwapChain11::resetOffscreenDepthBuffer(int backbufferWidth, int backbuffe
         depthStencilTextureDesc.Usage = D3D11_USAGE_DEFAULT;
         depthStencilTextureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 
-        if (depthBufferFormatInfo.formatSet->srvFormat != DXGI_FORMAT_UNKNOWN)
+        if (depthBufferFormatInfo.srvFormat != DXGI_FORMAT_UNKNOWN)
         {
             depthStencilTextureDesc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
         }
@@ -375,7 +370,7 @@ EGLint SwapChain11::resetOffscreenDepthBuffer(int backbufferWidth, int backbuffe
         d3d11::SetDebugName(mDepthStencilTexture, "Offscreen depth stencil texture");
 
         D3D11_DEPTH_STENCIL_VIEW_DESC depthStencilDesc;
-        depthStencilDesc.Format             = depthBufferFormatInfo.formatSet->dsvFormat;
+        depthStencilDesc.Format             = depthBufferFormatInfo.dsvFormat;
         depthStencilDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
         depthStencilDesc.Flags = 0;
         depthStencilDesc.Texture2D.MipSlice = 0;
@@ -384,10 +379,10 @@ EGLint SwapChain11::resetOffscreenDepthBuffer(int backbufferWidth, int backbuffe
         ASSERT(SUCCEEDED(result));
         d3d11::SetDebugName(mDepthStencilDSView, "Offscreen depth stencil view");
 
-        if (depthBufferFormatInfo.formatSet->srvFormat != DXGI_FORMAT_UNKNOWN)
+        if (depthBufferFormatInfo.srvFormat != DXGI_FORMAT_UNKNOWN)
         {
             D3D11_SHADER_RESOURCE_VIEW_DESC depthStencilSRVDesc;
-            depthStencilSRVDesc.Format                    = depthBufferFormatInfo.formatSet->srvFormat;
+            depthStencilSRVDesc.Format                    = depthBufferFormatInfo.srvFormat;
             depthStencilSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
             depthStencilSRVDesc.Texture2D.MostDetailedMip = 0;
             depthStencilSRVDesc.Texture2D.MipLevels = static_cast<UINT>(-1);
@@ -440,7 +435,17 @@ EGLint SwapChain11::resize(EGLint backbufferWidth, EGLint backbufferHeight)
         return EGL_BAD_ALLOC;
     }
 
-    result = mSwapChain->ResizeBuffers(desc.BufferCount, backbufferWidth, backbufferHeight, getSwapChainNativeFormat(), 0);
+    UINT flags = 0;
+    if (mFrameLatencyWaitableObject != nullptr)
+    {
+        // Workaround a bug in the D3D runtime that can cause 2 second hangs while resizing the window.
+        // In certain cases, D3D may not properly handle ResizeBuffers() if the previous Present() hasn't completed.
+        // The workaround is to always wait for the previous Present() to complete before calling ResizeBuffers().
+        (void)WaitForSingleObject(mFrameLatencyWaitableObject, 1000);
+        flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    }
+
+    result = mSwapChain->ResizeBuffers(desc.BufferCount, backbufferWidth, backbufferHeight, getSwapChainNativeFormat(), flags);
 
     if (FAILED(result))
     {
@@ -489,7 +494,7 @@ DXGI_FORMAT SwapChain11::getSwapChainNativeFormat() const
     return (mOffscreenRenderTargetFormat == GL_BGRA8_EXT) ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
-EGLint SwapChain11::reset(int backbufferWidth, int backbufferHeight, EGLint swapInterval)
+EGLint SwapChain11::reset(EGLint backbufferWidth, EGLint backbufferHeight, EGLint swapInterval)
 {
     mSwapInterval = static_cast<unsigned int>(swapInterval);
     if (mSwapInterval > 4)
@@ -511,6 +516,12 @@ EGLint SwapChain11::reset(int backbufferWidth, int backbufferHeight, EGLint swap
     if (device == NULL)
     {
         return EGL_BAD_ACCESS;
+    }
+
+    if (mFrameLatencyWaitableObject != nullptr)
+    {
+        CloseHandle(mFrameLatencyWaitableObject);
+        mFrameLatencyWaitableObject = nullptr;
     }
 
     // Release specific resources to free up memory for the new render target, while the
@@ -551,6 +562,15 @@ EGLint SwapChain11::reset(int backbufferWidth, int backbufferHeight, EGLint swap
         if (mRenderer->getRenderer11DeviceCaps().supportsDXGI1_2)
         {
             mSwapChain1 = d3d11::DynamicCastComObject<IDXGISwapChain1>(mSwapChain);
+
+            IDXGISwapChain2 *swapChain2 = d3d11::DynamicCastComObject<IDXGISwapChain2>(mSwapChain);
+            if (swapChain2 != nullptr)
+            {
+                // GetFrameLatencyWaitableObject() returns NULL if the swapchain was not created 
+                // with DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.
+                mFrameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
+                SafeRelease(swapChain2);
+            }
         }
 
         result = mSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&mBackBufferTexture);
@@ -876,4 +896,4 @@ void SwapChain11::recreate()
     // possibly should use this method instead of reset
 }
 
-}
+}  // namespace rx

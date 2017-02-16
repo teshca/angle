@@ -15,15 +15,17 @@ import sys, os, shutil
 
 # Set of search paths.
 source_paths = [
-    os.path.join('..', 'build', 'Debug_x64'),
-    os.path.join('..', 'build', 'Debug_Win32'),
-    os.path.join('..', 'build', 'Release_x64'),
-    os.path.join('..', 'build', 'Release_Win32'),
+    os.path.join('..', 'gyp', 'Debug_x64'),
+    os.path.join('..', 'gyp', 'Debug_Win32'),
+    os.path.join('..', 'gyp', 'Release_x64'),
+    os.path.join('..', 'gyp', 'Release_Win32'),
     os.path.join('..', 'out', 'Debug'),
     os.path.join('..', 'out', 'Debug_x64'),
     os.path.join('..', 'out', 'Release'),
     os.path.join('..', 'out', 'Release_x64'),
 ]
+
+script_dir = os.path.dirname(sys.argv[0])
 
 # Default Canary installation path.
 chrome_folder = os.path.join(os.environ['LOCALAPPDATA'], 'Google', 'Chrome SxS', 'Application')
@@ -33,12 +35,15 @@ binary_name = 'libGLESv2.dll'
 newest_folder = None
 newest_mtime = None
 for path in source_paths:
-    binary_path = os.path.join(path, binary_name)
+    binary_path = os.path.join(script_dir, path, binary_name)
     if os.path.exists(binary_path):
         binary_mtime = os.path.getmtime(binary_path)
         if (newest_folder is None) or (binary_mtime > newest_mtime):
-            newest_folder = path
+            newest_folder = os.path.join(script_dir, path)
             newest_mtime = binary_mtime
+
+if newest_folder is None:
+    sys.exit("Could not find ANGLE DLLs!")
 
 source_folder = newest_folder
 
@@ -53,8 +58,7 @@ dest_folder = os.path.join(chrome_folder, sorted_chrome_bins[0])
 
 print('Copying DLLs from ' + source_folder + ' to ' + dest_folder + '.')
 
-# Translator.dll appears if we build in component=shared_library mode.
-for dll in ['libGLESv2.dll', 'libEGL.dll', 'translator.dll']:
+for dll in ['libGLESv2.dll', 'libEGL.dll']:
     src = os.path.join(source_folder, dll)
     if os.path.exists(src):
         # Make a backup of the original unmodified DLLs if they are present.

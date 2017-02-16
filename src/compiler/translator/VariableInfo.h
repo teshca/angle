@@ -9,6 +9,7 @@
 
 #include <GLSLANG/ShaderLang.h>
 
+#include "compiler/translator/ExtensionBehavior.h"
 #include "compiler/translator/IntermNode.h"
 
 class TSymbolTable;
@@ -26,10 +27,11 @@ class CollectVariables : public TIntermTraverser
                      std::vector<Varying> *varyings,
                      std::vector<InterfaceBlock> *interfaceBlocks,
                      ShHashFunction64 hashFunction,
-                     const TSymbolTable &symbolTable);
+                     const TSymbolTable &symbolTable,
+                     const TExtensionBehavior &extensionBehavior);
 
     void visitSymbol(TIntermSymbol *symbol) override;
-    bool visitAggregate(Visit, TIntermAggregate *node) override;
+    bool visitDeclaration(Visit, TIntermDeclaration *node) override;
     bool visitBinary(Visit visit, TIntermBinary *binaryNode) override;
 
   private:
@@ -67,12 +69,17 @@ class CollectVariables : public TIntermTraverser
     ShHashFunction64 mHashFunction;
 
     const TSymbolTable &mSymbolTable;
+    const TExtensionBehavior &mExtensionBehavior;
 };
 
-// Expand struct uniforms to flattened lists of split variables
-void ExpandUniforms(const std::vector<Uniform> &compact,
+void ExpandVariable(const ShaderVariable &variable,
+                    const std::string &name,
+                    const std::string &mappedName,
+                    bool markStaticUse,
                     std::vector<ShaderVariable> *expanded);
 
+// Expand struct uniforms to flattened lists of split variables
+void ExpandUniforms(const std::vector<Uniform> &compact, std::vector<ShaderVariable> *expanded);
 }
 
 #endif  // COMPILER_TRANSLATOR_VARIABLEINFO_H_

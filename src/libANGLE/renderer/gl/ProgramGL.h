@@ -9,6 +9,9 @@
 #ifndef LIBANGLE_RENDERER_GL_PROGRAMGL_H_
 #define LIBANGLE_RENDERER_GL_PROGRAMGL_H_
 
+#include <string>
+#include <vector>
+
 #include "libANGLE/renderer/gl/WorkaroundsGL.h"
 #include "libANGLE/renderer/ProgramImpl.h"
 
@@ -30,10 +33,13 @@ class ProgramGL : public ProgramImpl
     ProgramGL(const gl::ProgramState &data,
               const FunctionsGL *functions,
               const WorkaroundsGL &workarounds,
-              StateManagerGL *stateManager);
+              StateManagerGL *stateManager,
+              bool enablePathRendering);
     ~ProgramGL() override;
 
-    LinkResult load(gl::InfoLog &infoLog, gl::BinaryInputStream *stream) override;
+    LinkResult load(const ContextImpl *contextImpl,
+                    gl::InfoLog &infoLog,
+                    gl::BinaryInputStream *stream) override;
     gl::Error save(gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
 
@@ -68,6 +74,11 @@ class ProgramGL : public ProgramImpl
     bool getUniformBlockMemberInfo(const std::string &memberUniformName,
                                    sh::BlockMemberInfo *memberInfoOut) const override;
 
+    void setPathFragmentInputGen(const std::string &inputName,
+                                 GLenum genMode,
+                                 GLint components,
+                                 const GLfloat *coeffs) override;
+
     GLuint getProgramID() const;
     const std::vector<SamplerBindingGL> &getAppliedSamplerUniforms() const;
 
@@ -91,6 +102,15 @@ class ProgramGL : public ProgramImpl
 
     // A map from a mData.getUniforms() index to a mSamplerBindings index.
     std::vector<size_t> mUniformIndexToSamplerIndex;
+
+    struct PathRenderingFragmentInput
+    {
+        std::string name;
+        GLint location;
+    };
+    std::vector<PathRenderingFragmentInput> mPathRenderingFragmentInputs;
+
+    bool mEnablePathRendering;
 
     GLuint mProgramID;
 };

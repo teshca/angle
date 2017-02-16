@@ -29,33 +29,36 @@ namespace
 class MockValidationContext : public ValidationContext
 {
   public:
-    MockValidationContext(GLint clientVersion,
-                          const State &state,
+    MockValidationContext(const Version &version,
+                          State *state,
                           const Caps &caps,
                           const TextureCapsMap &textureCaps,
                           const Extensions &extensions,
                           const ResourceManager *resourceManager,
                           const Limitations &limitations,
+                          const ResourceMap<Framebuffer> &framebufferMap,
                           bool skipValidation);
 
     MOCK_METHOD1(handleError, void(const Error &));
 };
 
-MockValidationContext::MockValidationContext(GLint clientVersion,
-                                             const State &state,
+MockValidationContext::MockValidationContext(const Version &version,
+                                             State *state,
                                              const Caps &caps,
                                              const TextureCapsMap &textureCaps,
                                              const Extensions &extensions,
                                              const ResourceManager *resourceManager,
                                              const Limitations &limitations,
+                                             const ResourceMap<Framebuffer> &framebufferMap,
                                              bool skipValidation)
-    : ValidationContext(clientVersion,
+    : ValidationContext(version,
                         state,
                         caps,
                         textureCaps,
                         extensions,
                         resourceManager,
                         limitations,
+                        framebufferMap,
                         skipValidation)
 {
 }
@@ -69,7 +72,7 @@ TEST(ValidationESTest, DrawElementsWithMaxIndexGivesError)
     auto programImpl     = MakeProgramMock();
 
     // TODO(jmadill): Generalize some of this code so we can re-use it for other tests.
-    NiceMock<MockFactory> mockFactory;
+    NiceMock<MockGLFactory> mockFactory;
     EXPECT_CALL(mockFactory, createFramebuffer(_)).WillOnce(Return(framebufferImpl));
     EXPECT_CALL(mockFactory, createProgram(_)).WillOnce(Return(programImpl));
     EXPECT_CALL(mockFactory, createVertexArray(_)).WillOnce(Return(nullptr));
@@ -79,12 +82,13 @@ TEST(ValidationESTest, DrawElementsWithMaxIndexGivesError)
     TextureCapsMap textureCaps;
     Extensions extensions;
     Limitations limitations;
+    ResourceMap<Framebuffer> framebufferMap;
 
     // Set some basic caps.
     caps.maxElementIndex     = 100;
     caps.maxDrawBuffers      = 1;
     caps.maxColorAttachments = 1;
-    state.initialize(caps, extensions, 3, false);
+    state.initialize(caps, extensions, Version(3, 0), false, true);
 
     NiceMock<MockTextureImpl> *textureImpl = new NiceMock<MockTextureImpl>();
     EXPECT_CALL(mockFactory, createTexture(_)).WillOnce(Return(textureImpl));
@@ -105,8 +109,9 @@ TEST(ValidationESTest, DrawElementsWithMaxIndexGivesError)
     state.setDrawFramebufferBinding(framebuffer);
     state.setProgram(program);
 
-    NiceMock<MockValidationContext> testContext(3, state, caps, textureCaps, extensions, nullptr,
-                                                limitations, false);
+    NiceMock<MockValidationContext> testContext(Version(3, 0), &state, caps, textureCaps,
+                                                extensions, nullptr, limitations, framebufferMap,
+                                                false);
 
     // Set the expectation for the validation error here.
     Error expectedError(GL_INVALID_OPERATION, g_ExceedsMaxElementErrorMessage);

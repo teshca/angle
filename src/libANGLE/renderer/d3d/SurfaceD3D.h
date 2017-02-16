@@ -25,16 +25,6 @@ class RendererD3D;
 class SurfaceD3D : public SurfaceImpl
 {
   public:
-    static SurfaceD3D *createFromWindow(RendererD3D *renderer,
-                                        egl::Display *display,
-                                        const egl::Config *config,
-                                        EGLNativeWindowType window,
-                                        const egl::AttributeMap &attribs);
-    static SurfaceD3D *createOffscreen(RendererD3D *renderer,
-                                       egl::Display *display,
-                                       const egl::Config *config,
-                                       EGLClientBuffer shareHandle,
-                                       const egl::AttributeMap &attribs);
     ~SurfaceD3D() override;
     void releaseSwapChain();
 
@@ -65,12 +55,14 @@ class SurfaceD3D : public SurfaceImpl
     gl::Error getAttachmentRenderTarget(const gl::FramebufferAttachment::Target &target,
                                         FramebufferAttachmentRenderTarget **rtOut) override;
 
-  private:
-    SurfaceD3D(RendererD3D *renderer,
+  protected:
+    SurfaceD3D(const egl::SurfaceState &state,
+               RendererD3D *renderer,
                egl::Display *display,
                const egl::Config *config,
                EGLNativeWindowType window,
-               EGLClientBuffer shareHandle,
+               EGLenum buftype,
+               EGLClientBuffer clientBuffer,
                const egl::AttributeMap &attribs);
 
     egl::Error swapRect(EGLint x, EGLint y, EGLint width, EGLint height);
@@ -96,9 +88,34 @@ class SurfaceD3D : public SurfaceImpl
     EGLint mSwapInterval;
 
     HANDLE mShareHandle;
+    IUnknown *mD3DTexture;
 };
 
+class WindowSurfaceD3D : public SurfaceD3D
+{
+  public:
+    WindowSurfaceD3D(const egl::SurfaceState &state,
+                     RendererD3D *renderer,
+                     egl::Display *display,
+                     const egl::Config *config,
+                     EGLNativeWindowType window,
+                     const egl::AttributeMap &attribs);
+    ~WindowSurfaceD3D() override;
+};
 
-}
+class PbufferSurfaceD3D : public SurfaceD3D
+{
+  public:
+    PbufferSurfaceD3D(const egl::SurfaceState &state,
+                      RendererD3D *renderer,
+                      egl::Display *display,
+                      const egl::Config *config,
+                      EGLenum buftype,
+                      EGLClientBuffer clientBuffer,
+                      const egl::AttributeMap &attribs);
+    ~PbufferSurfaceD3D() override;
+};
+
+}  // namespace rx
 
 #endif // LIBANGLE_RENDERER_D3D_SURFACED3D_H_

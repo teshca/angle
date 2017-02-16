@@ -17,6 +17,7 @@
 #include "libANGLE/Stream.h"
 #include "libANGLE/Surface.h"
 #include "libANGLE/Texture.h"
+#include "libANGLE/formatutils.h"
 
 #include <EGL/eglext.h>
 
@@ -58,7 +59,7 @@ bool TextureHasNonZeroMipLevelsSpecified(const gl::Context *context, const gl::T
             for (GLenum face = gl::FirstCubeMapTextureTarget; face <= gl::LastCubeMapTextureTarget;
                  face++)
             {
-                if (texture->getInternalFormat(face, level) != GL_NONE)
+                if (texture->getFormat(face, level).valid())
                 {
                     return true;
                 }
@@ -66,7 +67,7 @@ bool TextureHasNonZeroMipLevelsSpecified(const gl::Context *context, const gl::T
         }
         else
         {
-            if (texture->getInternalFormat(texture->getTarget(), level) != GL_NONE)
+            if (texture->getFormat(texture->getTarget(), level).valid())
             {
                 return true;
             }
@@ -81,7 +82,7 @@ bool CubeTextureHasUnspecifiedLevel0Face(const gl::Texture *texture)
     ASSERT(texture->getTarget() == GL_TEXTURE_CUBE_MAP);
     for (GLenum face = gl::FirstCubeMapTextureTarget; face <= gl::LastCubeMapTextureTarget; face++)
     {
-        if (texture->getInternalFormat(face, 0) == GL_NONE)
+        if (!texture->getFormat(face, 0).valid())
         {
             return true;
         }
@@ -123,6 +124,34 @@ egl::Error ValidateStreamAttribute(const EGLAttrib attribute,
     }
     return egl::Error(EGL_SUCCESS);
 }
+
+egl::Error ValidateCreateImageKHRMipLevelCommon(gl::Context *context,
+                                                const gl::Texture *texture,
+                                                EGLAttrib level)
+{
+    // Note that the spec EGL_KHR_create_image spec does not explicitly specify an error
+    // when the level is outside the base/max level range, but it does mention that the
+    // level "must be a part of the complete texture object <buffer>". It can be argued
+    // that out-of-range levels are not a part of the complete texture.
+    const GLuint effectiveBaseLevel = texture->getTextureState().getEffectiveBaseLevel();
+    if (level > 0 &&
+        (!texture->isMipmapComplete() || static_cast<GLuint>(level) < effectiveBaseLevel ||
+         static_cast<GLuint>(level) > texture->getTextureState().getMipmapMaxLevel()))
+    {
+        return egl::Error(EGL_BAD_PARAMETER, "texture must be complete if level is non-zero.");
+    }
+
+    if (level == 0 && !texture->isMipmapComplete() &&
+        TextureHasNonZeroMipLevelsSpecified(context, texture))
+    {
+        return egl::Error(EGL_BAD_PARAMETER,
+                          "if level is zero and the texture is incomplete, it must have no mip "
+                          "levels specified except zero.");
+    }
+
+    return egl::Error(EGL_SUCCESS);
+}
+
 }  // namespace
 
 namespace egl
@@ -145,16 +174,17 @@ Error ValidateDisplay(const Display *display)
         return Error(EGL_NOT_INITIALIZED, "display is not initialized.");
     }
 
+    if (display->isDeviceLost())
+    {
+        return Error(EGL_CONTEXT_LOST, "display had a context loss");
+    }
+
     return Error(EGL_SUCCESS);
 }
 
-Error ValidateSurface(const Display *display, Surface *surface)
+Error ValidateSurface(const Display *display, const Surface *surface)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     if (!display->isValidSurface(surface))
     {
@@ -166,11 +196,7 @@ Error ValidateSurface(const Display *display, Surface *surface)
 
 Error ValidateConfig(const Display *display, const Config *config)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     if (!display->isValidConfig(config))
     {
@@ -180,13 +206,9 @@ Error ValidateConfig(const Display *display, const Config *config)
     return Error(EGL_SUCCESS);
 }
 
-Error ValidateContext(const Display *display, gl::Context *context)
+Error ValidateContext(const Display *display, const gl::Context *context)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     if (!display->isValidContext(context))
     {
@@ -198,11 +220,7 @@ Error ValidateContext(const Display *display, gl::Context *context)
 
 Error ValidateImage(const Display *display, const Image *image)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     if (!display->isValidImage(image))
     {
@@ -214,11 +232,7 @@ Error ValidateImage(const Display *display, const Image *image)
 
 Error ValidateStream(const Display *display, const Stream *stream)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.stream)
@@ -237,18 +251,13 @@ Error ValidateStream(const Display *display, const Stream *stream)
 Error ValidateCreateContext(Display *display, Config *configuration, gl::Context *shareContext,
                             const AttributeMap& attributes)
 {
-    Error error = ValidateConfig(display, configuration);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateConfig(display, configuration));
 
     // Get the requested client version (default is 1) and check it is 2 or 3.
     EGLAttrib clientMajorVersion = 1;
     EGLAttrib clientMinorVersion = 0;
     EGLAttrib contextFlags       = 0;
     bool resetNotification = false;
-    bool robustAccess = false;
     for (AttributeMap::const_iterator attributeIter = attributes.begin(); attributeIter != attributes.end(); attributeIter++)
     {
         EGLAttrib attribute = attributeIter->first;
@@ -284,7 +293,6 @@ Error ValidateCreateContext(Display *display, Config *configuration, gl::Context
             {
                 return Error(EGL_BAD_ATTRIBUTE);
             }
-            robustAccess = (value == EGL_TRUE);
             break;
 
           case EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR:
@@ -317,19 +325,68 @@ Error ValidateCreateContext(Display *display, Config *configuration, gl::Context
               }
               break;
 
+          case EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE:
+              if (!display->getExtensions().createContextWebGLCompatibility)
+              {
+                  return Error(EGL_BAD_ATTRIBUTE,
+                               "Attribute EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE requires "
+                               "EGL_ANGLE_create_context_webgl_compatibility.");
+              }
+              if (value != EGL_TRUE && value != EGL_FALSE)
+              {
+                  return Error(
+                      EGL_BAD_ATTRIBUTE,
+                      "EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE must be EGL_TRUE or EGL_FALSE.");
+              }
+              break;
+
+          case EGL_CONTEXT_BIND_GENERATES_RESOURCE_CHROMIUM:
+              if (!display->getExtensions().createContextBindGeneratesResource)
+              {
+                  return Error(EGL_BAD_ATTRIBUTE,
+                               "Attribute EGL_CONTEXT_BIND_GENERATES_RESOURCE_CHROMIUM requires "
+                               "EGL_CHROMIUM_create_context_bind_generates_resource.");
+              }
+              if (value != EGL_TRUE && value != EGL_FALSE)
+              {
+                  return Error(EGL_BAD_ATTRIBUTE,
+                               "EGL_CONTEXT_BIND_GENERATES_RESOURCE_CHROMIUM must be EGL_TRUE or "
+                               "EGL_FALSE.");
+              }
+              break;
+
           default:
             return Error(EGL_BAD_ATTRIBUTE);
         }
     }
 
-    if ((clientMajorVersion != 2 && clientMajorVersion != 3) || clientMinorVersion != 0)
+    switch (clientMajorVersion)
     {
-        return Error(EGL_BAD_CONFIG);
-    }
-
-    if (clientMajorVersion == 3 && !(configuration->renderableType & EGL_OPENGL_ES3_BIT_KHR))
-    {
-        return Error(EGL_BAD_CONFIG);
+        case 2:
+            if (clientMinorVersion != 0)
+            {
+                return Error(EGL_BAD_CONFIG);
+            }
+            break;
+        case 3:
+            if (clientMinorVersion != 0 && clientMinorVersion != 1)
+            {
+                return Error(EGL_BAD_CONFIG);
+            }
+            if (!(configuration->renderableType & EGL_OPENGL_ES3_BIT_KHR))
+            {
+                return Error(EGL_BAD_CONFIG);
+            }
+            if (display->getMaxSupportedESVersion() <
+                gl::Version(static_cast<GLuint>(clientMajorVersion),
+                            static_cast<GLuint>(clientMinorVersion)))
+            {
+                return Error(EGL_BAD_CONFIG, "Requested GLES version is not supported.");
+            }
+            break;
+        default:
+            return Error(EGL_BAD_CONFIG);
+            break;
     }
 
     // Note: EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE_BIT_KHR does not apply to ES
@@ -338,17 +395,6 @@ Error ValidateCreateContext(Display *display, Config *configuration, gl::Context
     if ((contextFlags & ~validContextFlags) != 0)
     {
         return Error(EGL_BAD_ATTRIBUTE);
-    }
-
-    if ((contextFlags & EGL_CONTEXT_OPENGL_ROBUST_ACCESS_BIT_KHR) > 0)
-    {
-        robustAccess = true;
-    }
-
-    if (robustAccess)
-    {
-        // Unimplemented
-        return Error(EGL_BAD_CONFIG);
     }
 
     if (shareContext)
@@ -364,7 +410,8 @@ Error ValidateCreateContext(Display *display, Config *configuration, gl::Context
             return Error(EGL_BAD_MATCH);
         }
 
-        if (shareContext->getClientVersion() != clientMajorVersion)
+        if (shareContext->getClientMajorVersion() != clientMajorVersion ||
+            shareContext->getClientMinorVersion() != clientMinorVersion)
         {
             return Error(EGL_BAD_CONTEXT);
         }
@@ -376,11 +423,7 @@ Error ValidateCreateContext(Display *display, Config *configuration, gl::Context
 Error ValidateCreateWindowSurface(Display *display, Config *config, EGLNativeWindowType window,
                                   const AttributeMap& attributes)
 {
-    Error error = ValidateConfig(display, config);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateConfig(display, config));
 
     if (!display->isValidNativeWindow(window))
     {
@@ -487,11 +530,7 @@ Error ValidateCreateWindowSurface(Display *display, Config *config, EGLNativeWin
 
 Error ValidateCreatePbufferSurface(Display *display, Config *config, const AttributeMap& attributes)
 {
-    Error error = ValidateConfig(display, config);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateConfig(display, config));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
 
@@ -595,11 +634,7 @@ Error ValidateCreatePbufferSurface(Display *display, Config *config, const Attri
 Error ValidateCreatePbufferFromClientBuffer(Display *display, EGLenum buftype, EGLClientBuffer buffer,
                                             Config *config, const AttributeMap& attributes)
 {
-    Error error = ValidateConfig(display, config);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateConfig(display, config));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
 
@@ -615,6 +650,17 @@ Error ValidateCreatePbufferFromClientBuffer(Display *display, EGLenum buftype, E
             return Error(EGL_BAD_PARAMETER);
         }
         break;
+
+      case EGL_D3D_TEXTURE_ANGLE:
+          if (!displayExtensions.d3dTextureClientBuffer)
+          {
+              return Error(EGL_BAD_PARAMETER);
+          }
+          if (buffer == nullptr)
+          {
+              return Error(EGL_BAD_PARAMETER);
+          }
+          break;
 
       default:
         return Error(EGL_BAD_PARAMETER);
@@ -716,6 +762,8 @@ Error ValidateCreatePbufferFromClientBuffer(Display *display, EGLenum buftype, E
         }
     }
 
+    ANGLE_TRY(display->validateClientBuffer(config, buftype, buffer, attributes));
+
     return Error(EGL_SUCCESS);
 }
 
@@ -768,11 +816,7 @@ Error ValidateCreateImageKHR(const Display *display,
                              EGLClientBuffer buffer,
                              const AttributeMap &attributes)
 {
-    Error error = ValidateContext(display, context);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateContext(display, context));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
 
@@ -873,19 +917,7 @@ Error ValidateCreateImageKHR(const Display *display,
                              "target 2D texture does not have a valid size at specified level.");
             }
 
-            if (level > 0 && (!texture->isMipmapComplete() ||
-                              static_cast<size_t>(level) >= texture->getMipCompleteLevels()))
-            {
-                return Error(EGL_BAD_PARAMETER, "texture must be complete if level is non-zero.");
-            }
-
-            if (level == 0 && !texture->isMipmapComplete() &&
-                TextureHasNonZeroMipLevelsSpecified(context, texture))
-            {
-                return Error(EGL_BAD_PARAMETER,
-                             "if level is zero and the texture is incomplete, it must have no mip "
-                             "levels specified except zero.");
-            }
+            ANGLE_TRY(ValidateCreateImageKHRMipLevelCommon(context, texture, level));
         }
         break;
 
@@ -929,19 +961,7 @@ Error ValidateCreateImageKHR(const Display *display,
                              "and face.");
             }
 
-            if (level > 0 && (!texture->isMipmapComplete() ||
-                              static_cast<size_t>(level) >= texture->getMipCompleteLevels()))
-            {
-                return Error(EGL_BAD_PARAMETER, "texture must be complete if level is non-zero.");
-            }
-
-            if (level == 0 && !texture->isMipmapComplete() &&
-                TextureHasNonZeroMipLevelsSpecified(context, texture))
-            {
-                return Error(EGL_BAD_PARAMETER,
-                             "if level is zero and the texture is incomplete, it must have no mip "
-                             "levels specified except zero.");
-            }
+            ANGLE_TRY(ValidateCreateImageKHRMipLevelCommon(context, texture, level));
 
             if (level == 0 && !texture->isMipmapComplete() &&
                 CubeTextureHasUnspecifiedLevel0Face(texture))
@@ -996,19 +1016,7 @@ Error ValidateCreateImageKHR(const Display *display,
                              "offset at the specified level.");
             }
 
-            if (level > 0 && (!texture->isMipmapComplete() ||
-                              static_cast<size_t>(level) >= texture->getMipCompleteLevels()))
-            {
-                return Error(EGL_BAD_PARAMETER, "texture must be complete if level is non-zero.");
-            }
-
-            if (level == 0 && !texture->isMipmapComplete() &&
-                TextureHasNonZeroMipLevelsSpecified(context, texture))
-            {
-                return Error(EGL_BAD_PARAMETER,
-                             "if level is zero and the texture is incomplete, it must have no mip "
-                             "levels specified except zero.");
-            }
+            ANGLE_TRY(ValidateCreateImageKHRMipLevelCommon(context, texture, level));
         }
         break;
 
@@ -1055,11 +1063,7 @@ Error ValidateCreateImageKHR(const Display *display,
 
 Error ValidateDestroyImageKHR(const Display *display, const Image *image)
 {
-    Error error = ValidateImage(display, image);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateImage(display, image));
 
     if (!display->getExtensions().imageBase && !display->getExtensions().image)
     {
@@ -1126,11 +1130,7 @@ Error ValidateReleaseDeviceANGLE(Device *device)
 
 Error ValidateCreateStreamKHR(const Display *display, const AttributeMap &attributes)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.stream)
@@ -1143,11 +1143,7 @@ Error ValidateCreateStreamKHR(const Display *display, const AttributeMap &attrib
         EGLAttrib attribute = attributeIter.first;
         EGLAttrib value     = attributeIter.second;
 
-        error = ValidateStreamAttribute(attribute, value, displayExtensions);
-        if (error.isError())
-        {
-            return error;
-        }
+        ANGLE_TRY(ValidateStreamAttribute(attribute, value, displayExtensions));
     }
 
     return Error(EGL_SUCCESS);
@@ -1155,12 +1151,7 @@ Error ValidateCreateStreamKHR(const Display *display, const AttributeMap &attrib
 
 Error ValidateDestroyStreamKHR(const Display *display, const Stream *stream)
 {
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
-
+    ANGLE_TRY(ValidateStream(display, stream));
     return Error(EGL_SUCCESS);
 }
 
@@ -1169,11 +1160,7 @@ Error ValidateStreamAttribKHR(const Display *display,
                               EGLint attribute,
                               EGLint value)
 {
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateStream(display, stream));
 
     if (stream->getState() == EGL_STREAM_STATE_DISCONNECTED_KHR)
     {
@@ -1188,11 +1175,7 @@ Error ValidateQueryStreamKHR(const Display *display,
                              EGLenum attribute,
                              EGLint *value)
 {
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateStream(display, stream));
 
     switch (attribute)
     {
@@ -1217,11 +1200,7 @@ Error ValidateQueryStreamu64KHR(const Display *display,
                                 EGLenum attribute,
                                 EGLuint64KHR *value)
 {
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateStream(display, stream));
 
     switch (attribute)
     {
@@ -1239,17 +1218,8 @@ Error ValidateStreamConsumerGLTextureExternalKHR(const Display *display,
                                                  gl::Context *context,
                                                  const Stream *stream)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
-
-    error = ValidateContext(display, context);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
+    ANGLE_TRY(ValidateContext(display, context));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamConsumerGLTexture)
@@ -1273,7 +1243,7 @@ Error ValidateStreamConsumerGLTextureExternalKHR(const Display *display,
     }
 
     // Lookup the texture and ensure it is correct
-    gl::Texture *texture = context->getState().getTargetTexture(GL_TEXTURE_EXTERNAL_OES);
+    gl::Texture *texture = context->getGLState().getTargetTexture(GL_TEXTURE_EXTERNAL_OES);
     if (texture == nullptr || texture->getId() == 0)
     {
         return Error(EGL_BAD_ACCESS, "No external texture bound");
@@ -1286,11 +1256,7 @@ Error ValidateStreamConsumerAcquireKHR(const Display *display,
                                        gl::Context *context,
                                        const Stream *stream)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamConsumerGLTexture)
@@ -1303,11 +1269,12 @@ Error ValidateStreamConsumerAcquireKHR(const Display *display,
         return Error(EGL_BAD_STREAM_KHR, "Invalid stream");
     }
 
-    error = ValidateContext(display, context);
-    if (error.isError())
+    if (!context)
     {
-        return Error(EGL_BAD_ACCESS, "Invalid GL context");
+        return Error(EGL_BAD_ACCESS, "No GL context current to calling thread.");
     }
+
+    ANGLE_TRY(ValidateContext(display, context));
 
     if (!stream->isConsumerBoundToContext(context))
     {
@@ -1336,11 +1303,7 @@ Error ValidateStreamConsumerReleaseKHR(const Display *display,
                                        gl::Context *context,
                                        const Stream *stream)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamConsumerGLTexture)
@@ -1353,11 +1316,12 @@ Error ValidateStreamConsumerReleaseKHR(const Display *display,
         return Error(EGL_BAD_STREAM_KHR, "Invalid stream");
     }
 
-    error = ValidateContext(display, context);
-    if (error.isError())
+    if (!context)
     {
-        return Error(EGL_BAD_ACCESS, "Invalid GL context");
+        return Error(EGL_BAD_ACCESS, "No GL context current to calling thread.");
     }
+
+    ANGLE_TRY(ValidateContext(display, context));
 
     if (!stream->isConsumerBoundToContext(context))
     {
@@ -1384,17 +1348,7 @@ Error ValidateStreamConsumerGLTextureExternalAttribsNV(const Display *display,
                                                        const Stream *stream,
                                                        const AttributeMap &attribs)
 {
-    Error error = ValidateDisplay(display);
-    if (error.isError())
-    {
-        return error;
-    }
-
-    error = ValidateContext(display, context);
-    if (error.isError())
-    {
-        return Error(EGL_BAD_ACCESS, "Invalid context");
-    }
+    ANGLE_TRY(ValidateDisplay(display));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamConsumerGLTexture)
@@ -1414,6 +1368,13 @@ Error ValidateStreamConsumerGLTextureExternalAttribsNV(const Display *display,
     {
         return Error(EGL_BAD_STREAM_KHR, "Invalid stream");
     }
+
+    if (!context)
+    {
+        return Error(EGL_BAD_ACCESS, "No GL context current to calling thread.");
+    }
+
+    ANGLE_TRY(ValidateContext(display, context));
 
     if (stream->getState() != EGL_STREAM_STATE_CREATED_KHR)
     {
@@ -1487,7 +1448,7 @@ Error ValidateStreamConsumerGLTextureExternalAttribsNV(const Display *display,
         }
 
         // Lookup the texture and ensure it is correct
-        gl::Texture *texture = context->getState().getTargetTexture(GL_TEXTURE_EXTERNAL_OES);
+        gl::Texture *texture = context->getGLState().getTargetTexture(GL_TEXTURE_EXTERNAL_OES);
         if (texture == nullptr || texture->getId() == 0)
         {
             return Error(EGL_BAD_ACCESS, "No external texture bound");
@@ -1521,7 +1482,7 @@ Error ValidateStreamConsumerGLTextureExternalAttribsNV(const Display *display,
             }
             if (plane[i] != EGL_NONE)
             {
-                gl::Texture *texture = context->getState().getSamplerTexture(
+                gl::Texture *texture = context->getGLState().getSamplerTexture(
                     static_cast<unsigned int>(plane[i]), GL_TEXTURE_EXTERNAL_OES);
                 if (texture == nullptr || texture->getId() == 0)
                 {
@@ -1545,17 +1506,15 @@ Error ValidateCreateStreamProducerD3DTextureNV12ANGLE(const Display *display,
                                                       const Stream *stream,
                                                       const AttributeMap &attribs)
 {
+    ANGLE_TRY(ValidateDisplay(display));
+
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamProducerD3DTextureNV12)
     {
         return Error(EGL_BAD_ACCESS, "Stream producer extension not active");
     }
 
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateStream(display, stream));
 
     if (!attribs.isEmpty())
     {
@@ -1581,17 +1540,15 @@ Error ValidateStreamPostD3DTextureNV12ANGLE(const Display *display,
                                             void *texture,
                                             const AttributeMap &attribs)
 {
+    ANGLE_TRY(ValidateDisplay(display));
+
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamProducerD3DTextureNV12)
     {
         return Error(EGL_BAD_ACCESS, "Stream producer extension not active");
     }
 
-    Error error = ValidateStream(display, stream);
-    if (error.isError())
-    {
-        return error;
-    }
+    ANGLE_TRY(ValidateStream(display, stream));
 
     for (auto &attributeIter : attribs)
     {
@@ -1630,4 +1587,41 @@ Error ValidateStreamPostD3DTextureNV12ANGLE(const Display *display,
 
     return stream->validateD3D11NV12Texture(texture);
 }
+
+Error ValidateSwapBuffersWithDamageEXT(const Display *display,
+                                       const Surface *surface,
+                                       EGLint *rects,
+                                       EGLint n_rects)
+{
+    Error error = ValidateSurface(display, surface);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    if (!display->getExtensions().swapBuffersWithDamage)
+    {
+        // It is out of spec what happens when calling an extension function when the extension is
+        // not available. EGL_BAD_DISPLAY seems like a reasonable error.
+        return Error(EGL_BAD_DISPLAY, "EGL_EXT_swap_buffers_with_damage is not available.");
+    }
+
+    if (surface == EGL_NO_SURFACE)
+    {
+        return Error(EGL_BAD_SURFACE, "Swap surface cannot be EGL_NO_SURFACE.");
+    }
+
+    if (n_rects < 0)
+    {
+        return Error(EGL_BAD_PARAMETER, "n_rects cannot be negative.");
+    }
+
+    if (n_rects > 0 && rects == nullptr)
+    {
+        return Error(EGL_BAD_PARAMETER, "n_rects cannot be greater than zero when rects is NULL.");
+    }
+
+    return Error(EGL_SUCCESS);
 }
+
+}  // namespace gl

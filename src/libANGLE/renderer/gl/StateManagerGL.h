@@ -20,13 +20,14 @@
 namespace gl
 {
 struct Caps;
-struct ContextState;
+class ContextState;
 class State;
 }
 
 namespace rx
 {
 
+class FramebufferGL;
 class FunctionsGL;
 class TransformFeedbackGL;
 class QueryGL;
@@ -123,6 +124,18 @@ class StateManagerGL final : angle::NonCopyable
                            GLuint packBuffer);
 
     void setFramebufferSRGBEnabled(bool enabled);
+    void setFramebufferSRGBEnabledForFramebuffer(bool enabled, const FramebufferGL *framebuffer);
+
+    void setDitherEnabled(bool enabled);
+
+    void setMultisamplingStateEnabled(bool enabled);
+    void setSampleAlphaToOneStateEnabled(bool enabled);
+
+    void setCoverageModulation(GLenum components);
+
+    void setPathRenderingModelViewMatrix(const GLfloat *m);
+    void setPathRenderingProjectionMatrix(const GLfloat *m);
+    void setPathRenderingStencilState(GLenum func, GLint ref, GLuint mask);
 
     void onDeleteQueryObject(QueryGL *query);
 
@@ -136,10 +149,18 @@ class StateManagerGL final : angle::NonCopyable
                                    const GLvoid *indices,
                                    GLsizei instanceCount,
                                    const GLvoid **outIndices);
+    gl::Error setDrawIndirectState(const gl::ContextState &data, GLenum type);
 
+    void pauseTransformFeedback();
+    void pauseAllQueries();
+    void pauseQuery(GLenum type);
+    void resumeAllQueries();
+    void resumeQuery(GLenum type);
     gl::Error onMakeCurrent(const gl::ContextState &data);
 
     void syncState(const gl::State &state, const gl::State::DirtyBits &glDirtyBits);
+
+    GLuint getBoundBuffer(GLenum type);
 
   private:
     gl::Error setGenericDrawState(const gl::ContextState &data);
@@ -252,7 +273,19 @@ class StateManagerGL final : angle::NonCopyable
     GLint mClearStencil;
 
     bool mFramebufferSRGBEnabled;
+    bool mDitherEnabled;
     bool mTextureCubemapSeamlessEnabled;
+
+    bool mMultisamplingEnabled;
+    bool mSampleAlphaToOneEnabled;
+
+    GLenum mCoverageModulation;
+
+    GLfloat mPathMatrixMV[16];
+    GLfloat mPathMatrixProj[16];
+    GLenum mPathStencilFunc;
+    GLint mPathStencilRef;
+    GLuint mPathStencilMask;
 
     gl::State::DirtyBits mLocalDirtyBits;
 };

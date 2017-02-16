@@ -16,7 +16,7 @@
 #include "libANGLE/renderer/d3d/ProgramD3D.h"
 #include "libANGLE/renderer/d3d/RendererD3D.h"
 #include "libANGLE/renderer/d3d/ShaderD3D.h"
-#include "libANGLE/renderer/d3d/VaryingPacking.h"
+#include "libANGLE/renderer/d3d/hlsl/VaryingPacking.h"
 
 using namespace gl;
 
@@ -117,16 +117,9 @@ void WriteArrayString(std::stringstream &strstr, unsigned int i)
     strstr << "]";
 }
 
-const std::string VERTEX_ATTRIBUTE_STUB_STRING = "@@ VERTEX ATTRIBUTES @@";
-const std::string PIXEL_OUTPUT_STUB_STRING     = "@@ PIXEL OUTPUT @@";
+constexpr const char *VERTEX_ATTRIBUTE_STUB_STRING = "@@ VERTEX ATTRIBUTES @@";
+constexpr const char *PIXEL_OUTPUT_STUB_STRING     = "@@ PIXEL OUTPUT @@";
 }  // anonymous namespace
-
-std::string GetVaryingSemantic(int majorShaderModel, bool programUsesPointSize)
-{
-    // SM3 reserves the TEXCOORD semantic for point sprite texcoords (gl_PointCoord)
-    // In D3D11 we manually compute gl_PointCoord in the GS.
-    return ((programUsesPointSize && majorShaderModel < 4) ? "COLOR" : "TEXCOORD");
-}
 
 // DynamicHLSL implementation
 
@@ -295,7 +288,7 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
     std::string vertexHLSL(sourceShader);
 
     size_t copyInsertionPos = vertexHLSL.find(VERTEX_ATTRIBUTE_STUB_STRING);
-    vertexHLSL.replace(copyInsertionPos, VERTEX_ATTRIBUTE_STUB_STRING.length(), structStream.str());
+    vertexHLSL.replace(copyInsertionPos, strlen(VERTEX_ATTRIBUTE_STUB_STRING), structStream.str());
 
     return vertexHLSL;
 }
@@ -360,7 +353,7 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
     std::string pixelHLSL(sourceShader);
 
     size_t outputInsertionPos = pixelHLSL.find(PIXEL_OUTPUT_STUB_STRING);
-    pixelHLSL.replace(outputInsertionPos, PIXEL_OUTPUT_STUB_STRING.length(),
+    pixelHLSL.replace(outputInsertionPos, strlen(PIXEL_OUTPUT_STUB_STRING),
                       declarationStream.str());
 
     return pixelHLSL;
@@ -434,13 +427,13 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::ContextState &data,
     if (useInstancedPointSpriteEmulation)
     {
         vertexStream << "static float minPointSize = "
-                     << static_cast<int>(data.caps->minAliasedPointSize) << ".0f;\n"
+                     << static_cast<int>(data.getCaps().minAliasedPointSize) << ".0f;\n"
                      << "static float maxPointSize = "
-                     << static_cast<int>(data.caps->maxAliasedPointSize) << ".0f;\n";
+                     << static_cast<int>(data.getCaps().maxAliasedPointSize) << ".0f;\n";
     }
 
     // Add stub string to be replaced when shader is dynamically defined by its layout
-    vertexStream << "\n" << VERTEX_ATTRIBUTE_STUB_STRING + "\n";
+    vertexStream << "\n" << std::string(VERTEX_ATTRIBUTE_STUB_STRING) << "\n";
 
     // Write the HLSL input/output declarations
     vertexStream << "struct VS_OUTPUT\n";
@@ -597,7 +590,7 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::ContextState &data,
     generateVaryingLinkHLSL(SHADER_PIXEL, varyingPacking, pixelStream);
     pixelStream << "\n";
 
-    pixelStream << PIXEL_OUTPUT_STUB_STRING + "\n";
+    pixelStream << std::string(PIXEL_OUTPUT_STUB_STRING) << "\n";
 
     if (fragmentShader->usesFrontFacing())
     {
@@ -720,7 +713,9 @@ bool DynamicHLSL::generateShaderLinkHLSL(const gl::ContextState &data,
         ASSERT(!varying.isBuiltIn() && !varying.isStruct());
 
         // Don't reference VS-only transform feedback varyings in the PS.
-        if (registerInfo.packedVarying->vertexOnly)
+        // TODO: Consider updating the fragment shader's varyings with a parameter signaling that a
+        // varying is only used in the vertex shader in MergeVaryings
+        if (packedVarying.vertexOnly || (!varying.staticUse && !packedVarying.isStructField()))
             continue;
 
         pixelStream << "    ";
@@ -903,10 +898,10 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(gl::PrimitiveType primitiveT
                         "};\n"
                         "\n"
                         "static float minPointSize = "
-                     << static_cast<int>(data.caps->minAliasedPointSize)
+                     << static_cast<int>(data.getCaps().minAliasedPointSize)
                      << ".0f;\n"
                         "static float maxPointSize = "
-                     << static_cast<int>(data.caps->maxAliasedPointSize) << ".0f;\n"
+                     << static_cast<int>(data.getCaps().maxAliasedPointSize) << ".0f;\n"
                      << "\n";
     }
 
@@ -1039,7 +1034,7 @@ void DynamicHLSL::getPixelShaderOutputKey(const gl::ContextState &data,
     // - with a 2.0 context, the output color is broadcast to all channels
     bool broadcast = metadata.usesBroadcast(data);
     const unsigned int numRenderTargets =
-        (broadcast || metadata.usesMultipleFragmentOuts() ? data.caps->maxDrawBuffers : 1);
+        (broadcast || metadata.usesMultipleFragmentOuts() ? data.getCaps().maxDrawBuffers : 1);
 
     if (metadata.getMajorShaderVersion() < 300)
     {
