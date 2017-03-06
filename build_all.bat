@@ -13,36 +13,32 @@ msbuild .\winrt\10\src\angle.sln /t:Rebuild /p:Configuration=Debug /p:Platform=A
 
 :collect
 
-rm -rf .\out
-mkdir .\out || goto fail
+rmdir .\out /s /q
 
-mkdir .\out\uwp.x86 || goto fail
 mkdir .\out\uwp.x86\lib || goto fail
-cp .\winrt\10\src\Debug_Win32\lib\libEGL.lib .\out\uwp.x86\lib\contrib-angle-debug.lib || goto fail
-cp .\winrt\10\src\Release_Win32\lib\libEGL.lib .\out\uwp.x86\lib\contrib-angle.lib || goto fail
+copy .\winrt\10\src\Debug_Win32\lib\libEGL.lib .\out\uwp.x86\lib\contrib-angle-debug.lib || goto fail
+copy .\winrt\10\src\Release_Win32\lib\libEGL.lib .\out\uwp.x86\lib\contrib-angle.lib || goto fail
 
-mkdir .\out\uwp.x64 || goto fail
 mkdir .\out\uwp.x64\lib || goto fail
-cp .\winrt\10\src\Debug_x64\lib\libEGL.lib .\out\uwp.x64\lib\contrib-angle-debug.lib || goto fail
-cp .\winrt\10\src\Release_x64\lib\libEGL.lib .\out\uwp.x64\lib\contrib-angle.lib || goto fail
+copy .\winrt\10\src\Debug_x64\lib\libEGL.lib .\out\uwp.x64\lib\contrib-angle-debug.lib || goto fail
+copy .\winrt\10\src\Release_x64\lib\libEGL.lib .\out\uwp.x64\lib\contrib-angle.lib || goto fail
 
-mkdir .\out\uwp.arm || goto fail
 mkdir .\out\uwp.arm\lib || goto fail
-cp .\winrt\10\src\Debug_ARM\lib\libEGL.lib .\out\uwp.arm\lib\contrib-angle-debug.lib || goto fail
-cp .\winrt\10\src\Release_ARM\lib\libEGL.lib .\out\uwp.arm\lib\contrib-angle.lib || goto fail
+copy .\winrt\10\src\Debug_ARM\lib\libEGL.lib .\out\uwp.arm\lib\contrib-angle-debug.lib || goto fail
+copy .\winrt\10\src\Release_ARM\lib\libEGL.lib .\out\uwp.arm\lib\contrib-angle.lib || goto fail
 
 mkdir .\out\include || goto fail
-cp -r .\include\EGL .\out\include\EGL || goto fail
-cp -r .\include\GLES2 .\out\include\GLES2 || goto fail
-cp -r .\include\GLES3 .\out\include\GLES3 || goto fail
-cp -r .\include\GLSLANG .\out\include\GLSLANG || goto fail
-cp -r .\include\KHR .\out\include\KHR || goto fail
-cp .\include\angle_gl.h .\out\include\angle_gl.h || goto fail
-cp .\include\angle_windowsstore.h .\out\include\angle_windowsstore.h || goto fail
+xcopy .\include\EGL .\out\include\EGL /I /E || goto fail
+xcopy .\include\GLES2 .\out\include\GLES2 /I /E || goto fail
+xcopy .\include\GLES3 .\out\include\GLES3 /I /E || goto fail
+xcopy .\include\GLSLANG .\out\include\GLSLANG /I /E || goto fail
+xcopy .\include\KHR .\out\include\KHR /I /E || goto fail
+copy .\include\angle_gl.h .\out\include\angle_gl.h || goto fail
+copy .\include\angle_windowsstore.h .\out\include\angle_windowsstore.h || goto fail
 
-cp -r .\out\include .\out\uwp.x86\include || goto fail
-cp -r .\out\include .\out\uwp.x64\include || goto fail
-mv .\out\include .\out\uwp.arm\include || goto fail
+xcopy .\out\include .\out\uwp.x86\include /I /E || goto fail
+xcopy .\out\include .\out\uwp.x64\include /I /E || goto fail
+move .\out\include .\out\uwp.arm\include || goto fail
 
 :success
 
