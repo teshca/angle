@@ -1,0 +1,23 @@
+1. go to mapsmobi/contrib/angle
+2. change settings.gradle:
+	- pkg name: "contrib-angle"
+	- version: ++
+3. run gradle pkg -PSIGN -PINSTALL
+4. now you have empty "contrib-angle" debean package! OMG!
+5. change settings.gradle AGAIN
+	- pkg name: "contrib-angle-uwp"
+====
+6. go back to angle source dir
+7. run buils_all.bat
+8. copy files form ./out to mapsmobi/contrib/angle/local
+9. go to mapsmobi/contrib/angle
+10. run gradle pkg -PSIGN -PINSTALL
+====
+11. Rebuild runtime, rebuild MapKit, rebuild TestApp
+12. Run TestApp
+====
+
+13. go to mapsmobi/contrib/angle/build/dev
+14. dupload yandex-mapsmobi-contrib-angle_0.0.5_all.changes yandex-mapsmobi-contrib-angle-uwp_0.0.5_all.changes
+15. Use conductor to move pkg to testing
+	- https://conductor.yandex-team.ru/tickets/1006347/clone
