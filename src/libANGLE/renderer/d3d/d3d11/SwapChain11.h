@@ -79,7 +79,6 @@ class SwapChain11 final : public SwapChainD3D
     IDXGISwapChain *mSwapChain;
     IDXGISwapChain1 *mSwapChain1;
     IDXGIKeyedMutex *mKeyedMutex;
-    HANDLE mFrameLatencyWaitableObject;
 
     ID3D11Texture2D *mBackBufferTexture;
     ID3D11RenderTargetView *mBackBufferRTView;
